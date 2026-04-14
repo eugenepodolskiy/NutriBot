@@ -1,5 +1,6 @@
 package com.nutribot.nutribot.bot;
 
+import com.nutribot.nutribot.services.GeminiService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
@@ -10,8 +11,12 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 @Component
 public class NutriBot extends TelegramLongPollingBot {
 
-    public NutriBot(@Value("${telegram.bot.token}") String token) {
+    private final GeminiService geminiService;
+
+    public NutriBot(@Value("${telegram.bot.token}") String token,
+                    GeminiService geminiService) {
         super(token);
+        this.geminiService = geminiService;
     }
 
     @Override
@@ -20,7 +25,8 @@ public class NutriBot extends TelegramLongPollingBot {
             String text = update.getMessage().getText();
             Long chatId = update.getMessage().getChatId();
 
-            sendMessage(chatId, "You said: " + text);
+            String response = geminiService.ask(text);
+            sendMessage(chatId, response);
         }
     }
 
