@@ -1,0 +1,10 @@
+services:
+  db:
+    image: postgres:16
+    container_name: nutribot-db
+    environment:
+      POSTGRES_USER: nutribot
+      POSTGRES_PASSWORD: nutribot
+      POSTGRES_DB: nutribot
+    ports:
+      - "5432:5432"

@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: nutribot
+  datasource:
+    url: jdbc:postgresql://localhost:5432/nutribot
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+telegram:
+  bot:
+    token: ${TELEGRAM_BOT_TOKEN}
+    username: ${TELEGRAM_BOT_USERNAME}
+
+gemini:
+  api:
+    key: ${GEMINI_API_KEY}
