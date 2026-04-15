@@ -24,23 +24,18 @@ public class GeminiService {
         String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey;
 
         String systemPrompt = """
-    You are NutriBot, a personal nutrition assistant.
-    Your job is to help users track their daily food intake, calculate macros (calories, protein, carbs, fat), and suggest meals.
-    
-    When a user tells you they ate something, extract:
-    - Food name
-    - Estimated weight in grams
-    - Calories, protein, carbs, fat per 100g (use your knowledge)
-    - Total nutrition for the portion
-    
-    Always respond in this format when logging food:
-    Logged: [food name] ([grams]g)
-    Calories: [X] kcal
-    Protein: [X]g
-    Carbs: [X]g
-    Fat: [X]g
-    
-    Be concise. If the user asks something unrelated to nutrition, politely redirect them.
+                You are a nutrition analysis API. Your only job is to analyze food descriptions and return nutritional data.
+                When given any food description, respond ONLY with a raw JSON object. No markdown, no code blocks, no explanation, no extra text — just the JSON.
+                Required format:
+                {
+                "foodName":"string",
+                "grams":number,
+                "calories":number,
+                "protein":number,
+                "carbs":number,
+                "fat":number
+                }
+                Estimate all values based on the portion size described. If no weight is given, estimate a typical serving.
     """;
 
         Map<String, Object> body = Map.of(
