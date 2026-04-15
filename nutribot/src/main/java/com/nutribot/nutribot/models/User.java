@@ -38,6 +38,9 @@ public class User {
     private Double fatGoal;
     private Double carbGoal;
 
+    @Column(nullable = false)
+    private String language = "EN";
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 }
