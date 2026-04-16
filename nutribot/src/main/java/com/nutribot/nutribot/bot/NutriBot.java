@@ -3,6 +3,8 @@ package com.nutribot.nutribot.bot;
 import com.nutribot.nutribot.dto.NutritionResponse;
 import com.nutribot.nutribot.enums.LogSource;
 import com.nutribot.nutribot.services.*;
+import com.nutribot.nutribot.services.ManagementService;
+import com.nutribot.nutribot.services.ManagementStateService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -42,6 +44,8 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
     private final PendingConfirmationService pendingConfirmationService;
     private final SupplementService         supplementService;
     private final UserService               userService;
+    private final ManagementService         managementService;
+    private final ManagementStateService    managementStateService;
 
     @Value("${telegram.bot.token}")
     private String botToken;
@@ -53,15 +57,19 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
                     TelegramMessageSender messageSender,
                     PendingConfirmationService pendingConfirmationService,
                     SupplementService supplementService,
-                    UserService userService) {
-        this.telegramClient           = telegramClient;
-        this.geminiService            = geminiService;
-        this.foodLogService           = foodLogService;
-        this.onboardingService        = onboardingService;
-        this.messageSender            = messageSender;
+                    UserService userService,
+                    ManagementService managementService,
+                    ManagementStateService managementStateService) {
+        this.telegramClient             = telegramClient;
+        this.geminiService              = geminiService;
+        this.foodLogService             = foodLogService;
+        this.onboardingService          = onboardingService;
+        this.messageSender              = messageSender;
         this.pendingConfirmationService = pendingConfirmationService;
-        this.supplementService        = supplementService;
-        this.userService              = userService;
+        this.supplementService          = supplementService;
+        this.userService                = userService;
+        this.managementService          = managementService;
+        this.managementStateService     = managementStateService;
     }
 
     @Override
@@ -171,6 +179,23 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
 
         if (onboardingService.needsOnboarding(chatId)) {
             messageSender.sendMessage(chatId, "Please send /start to set up your profile first.");
+            return;
+        }
+
+        if (text.equals("/manage")) {
+            String lang = foodLogService.getUserLanguage(chatId);
+            messageSender.sendAndGetId(buildManageMenu(chatId, lang));
+            return;
+        }
+
+        // Management state: user is replying with a supplement number to delete
+        if (managementStateService.hasState(chatId) &&
+                ManagementStateService.AWAITING_SUPPLEMENT_DELETE.equals(managementStateService.getState(chatId))) {
+            try {
+                messageSender.sendMessage(chatId, managementService.processDeleteSupplementByNumber(chatId, text));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
             return;
         }
 
@@ -377,7 +402,95 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
             messageSender.sendMessage(chatId, "RU".equals(lang)
                     ? "Отменено. Опиши еду по-другому, и я попробую снова."
                     : "Cancelled. Describe the food differently and I'll try again.");
+
+        } else if ("mgmt_del_last".equals(data)) {
+            try {
+                messageSender.sendMessage(chatId, managementService.deleteLastFoodLog(chatId));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+
+        } else if ("mgmt_clear_today".equals(data)) {
+            try {
+                messageSender.sendMessage(chatId, managementService.clearTodayFoodLog(chatId));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+
+        } else if ("mgmt_view_supps".equals(data)) {
+            try {
+                messageSender.sendMessage(chatId, managementService.viewSupplements(chatId));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+
+        } else if ("mgmt_del_supp".equals(data)) {
+            try {
+                messageSender.sendMessage(chatId, managementService.startDeleteSupplement(chatId));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+
+        } else if ("mgmt_reset_profile".equals(data)) {
+            // Clear any in-flight states before wiping the user
+            pendingConfirmationService.clear(chatId);
+            managementStateService.clearState(chatId);
+            String languageCode = null; // language will be re-detected during onboarding
+            try {
+                messageSender.sendMessage(chatId, managementService.resetProfile(chatId, languageCode));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+
+        } else if ("mgmt_view_goals".equals(data)) {
+            try {
+                messageSender.sendMessage(chatId, managementService.viewGoals(chatId));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
         }
+    }
+
+    // ── /manage menu builder ───────────────────────────────────────────────────
+
+    private static SendMessage buildManageMenu(Long chatId, String lang) {
+        boolean ru = "RU".equals(lang);
+
+        InlineKeyboardButton delLastBtn = InlineKeyboardButton.builder()
+                .text(ru ? "Удалить последнюю запись" : "Delete last food log entry")
+                .callbackData("mgmt_del_last").build();
+
+        InlineKeyboardButton clearTodayBtn = InlineKeyboardButton.builder()
+                .text(ru ? "Очистить лог за сегодня" : "Clear today's food log")
+                .callbackData("mgmt_clear_today").build();
+
+        InlineKeyboardButton viewSuppsBtn = InlineKeyboardButton.builder()
+                .text(ru ? "Мои добавки" : "View my supplements")
+                .callbackData("mgmt_view_supps").build();
+
+        InlineKeyboardButton delSuppBtn = InlineKeyboardButton.builder()
+                .text(ru ? "Удалить добавку" : "Delete a supplement")
+                .callbackData("mgmt_del_supp").build();
+
+        InlineKeyboardButton resetBtn = InlineKeyboardButton.builder()
+                .text(ru ? "Сбросить профиль" : "Reset my profile")
+                .callbackData("mgmt_reset_profile").build();
+
+        InlineKeyboardButton goalsBtn = InlineKeyboardButton.builder()
+                .text(ru ? "Мои цели" : "View my current goals")
+                .callbackData("mgmt_view_goals").build();
+
+        InlineKeyboardMarkup keyboard = InlineKeyboardMarkup.builder()
+                .keyboardRow(new InlineKeyboardRow(delLastBtn, clearTodayBtn))
+                .keyboardRow(new InlineKeyboardRow(viewSuppsBtn, delSuppBtn))
+                .keyboardRow(new InlineKeyboardRow(resetBtn, goalsBtn))
+                .build();
+
+        return SendMessage.builder()
+                .chatId(chatId)
+                .text(ru ? "Управление данными:" : "Data management:")
+                .replyMarkup(keyboard)
+                .build();
     }
 
     // ── Confirmation message builders ──────────────────────────────────────────
