@@ -2,9 +2,9 @@ spring:
   application:
     name: nutribot
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/nutribot}
-    username: ${DB_USER:nutribot}
-    password: ${DB_PASSWORD:nutribot}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/nutribot}
+    username: ${SPRING_DATASOURCE_USERNAME:nutribot}
+    password: ${SPRING_DATASOURCE_PASSWORD:nutribot}
   jpa:
     hibernate:
       ddl-auto: validate
