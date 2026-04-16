@@ -2,6 +2,7 @@ package com.nutribot.nutribot.services;
 
 import com.nutribot.nutribot.enums.ActivityLevel;
 import com.nutribot.nutribot.enums.GoalType;
+import com.nutribot.nutribot.enums.Sex;
 import com.nutribot.nutribot.models.User;
 import com.nutribot.nutribot.repositories.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class OnboardingService {
 
     private enum Step {
-        NAME, AGE, WEIGHT, HEIGHT, ACTIVITY, GOAL
+        NAME, AGE, WEIGHT, HEIGHT, SEX, ACTIVITY, GOAL
     }
 
     private enum Language {
@@ -24,18 +25,19 @@ public class OnboardingService {
     }
 
     private static class State {
-        Step step = Step.NAME;
-        Language language = Language.EN;
-        String name;
-        int age;
-        double weightKg;
-        double heightCm;
+        Step     step         = Step.NAME;
+        Language language     = Language.EN;
+        String   name;
+        int      age;
+        double   weightKg;
+        double   heightCm;
+        Sex      sex;
         ActivityLevel activityLevel;
     }
 
     private final Map<Long, State> sessions = new ConcurrentHashMap<>();
-    private final UserRepository userRepository;
-    private final GeminiService geminiService;
+    private final UserRepository  userRepository;
+    private final GeminiService   geminiService;
 
     public boolean needsOnboarding(Long telegramId) {
         return userRepository.findByTelegramId(telegramId).isEmpty();
@@ -45,10 +47,6 @@ public class OnboardingService {
         return sessions.containsKey(telegramId);
     }
 
-    /**
-     * Starts onboarding. telegramLanguageCode is the BCP-47 tag from the Telegram
-     * user object (e.g. "ru", "en", "uk"). May be null — defaults to EN.
-     */
     public String start(Long telegramId, String telegramLanguageCode) {
         State state = new State();
         if (telegramLanguageCode != null && telegramLanguageCode.toLowerCase().startsWith("ru")) {
@@ -68,7 +66,6 @@ public class OnboardingService {
         return switch (state.step) {
             case NAME -> {
                 state.name = text.trim();
-                // Name Cyrillic check takes priority over Telegram locale
                 state.language = hasCyrillic(state.name) ? Language.RU : Language.EN;
                 state.step = Step.AGE;
                 yield msg(state.language,
@@ -124,6 +121,24 @@ public class OnboardingService {
                         "Please enter a valid height between 50 and 300 cm.",
                         "Введите корректный рост от 50 до 300 см.");
                 state.heightCm = height;
+                state.step = Step.SEX;
+                yield msg(state.language,
+                        "What is your biological sex?\nPlease reply: male or female",
+                        "Укажите ваш биологический пол.\nОтветьте: мужской или женский");
+            }
+            case SEX -> {
+                String input = text.trim().toLowerCase();
+                if (input.contains("male") || input.contains("man") ||
+                    input.contains("мужской") || input.contains("мужчина") || input.equals("м")) {
+                    state.sex = Sex.MALE;
+                } else if (input.contains("female") || input.contains("woman") ||
+                           input.contains("женский") || input.contains("женщина") || input.equals("ж")) {
+                    state.sex = Sex.FEMALE;
+                } else {
+                    yield msg(state.language,
+                            "Please reply with male or female.",
+                            "Пожалуйста, ответьте: мужской или женский.");
+                }
                 state.step = Step.ACTIVITY;
                 yield msg(state.language,
                         """
@@ -175,23 +190,29 @@ public class OnboardingService {
                                 Protein:  %.0f g
                                 Carbs:    %.0f g
                                 Fat:      %.0f g
+                                Fiber:    %.0f g
+                                Water:    %.0f ml
 
                                 Now just tell me what you ate and I'll log it for you!""",
                                 """
                                 Профиль сохранён, %s!
 
                                 Ваши ежедневные цели по питанию:
-                                Калории:  %.0f ккал
-                                Белки:    %.0f г
-                                Углеводы: %.0f г
-                                Жиры:     %.0f г
+                                Калории:   %.0f ккал
+                                Белки:     %.0f г
+                                Углеводы:  %.0f г
+                                Жиры:      %.0f г
+                                Клетчатка: %.0f г
+                                Вода:      %.0f мл
 
                                 Теперь просто напишите, что вы съели, и я всё запишу!"""),
                         name,
                         user.getCalorieGoal(),
                         user.getProteinGoal(),
                         user.getCarbGoal(),
-                        user.getFatGoal());
+                        user.getFatGoal(),
+                        user.getFiberGoal(),
+                        user.getWaterGoal());
             }
         };
     }
@@ -205,28 +226,48 @@ public class OnboardingService {
     }
 
     private User buildUser(Long telegramId, State state, GoalType goalType) {
-        // Mifflin-St Jeor BMR (unisex average: midpoint of male +5 and female -161 constants = -78)
-        double bmr = 10 * state.weightKg + 6.25 * state.heightCm - 5 * state.age - 78;
+        // Sex-specific Mifflin-St Jeor BMR
+        double bmr;
+        if (state.sex == Sex.MALE) {
+            bmr = 10 * state.weightKg + 6.25 * state.heightCm - 5 * state.age + 5;
+        } else if (state.sex == Sex.FEMALE) {
+            bmr = 10 * state.weightKg + 6.25 * state.heightCm - 5 * state.age - 161;
+        } else {
+            // Unisex fallback (midpoint of male and female constants)
+            bmr = 10 * state.weightKg + 6.25 * state.heightCm - 5 * state.age - 78;
+        }
 
         double activityMultiplier = switch (state.activityLevel) {
             case SEDENTARY -> 1.2;
-            case LIGHT -> 1.375;
-            case MODERATE -> 1.55;
-            case ACTIVE -> 1.725;
+            case LIGHT     -> 1.375;
+            case MODERATE  -> 1.55;
+            case ACTIVE    -> 1.725;
         };
 
         double tdee = bmr * activityMultiplier;
 
         double calorieGoal = switch (goalType) {
-            case LOSE -> tdee * 0.85;
+            case LOSE     -> tdee * 0.85;
             case MAINTAIN -> tdee;
-            case GAIN -> tdee * 1.10;
+            case GAIN     -> tdee * 1.10;
         };
 
-        // Macros: protein 30%, carbs 40%, fat 30% of total calories
-        double proteinGoal = (calorieGoal * 0.30) / 4; // 4 kcal/g
-        double carbGoal    = (calorieGoal * 0.40) / 4;
-        double fatGoal     = (calorieGoal * 0.30) / 9; // 9 kcal/g
+        // Weight-based protein goal
+        double proteinGoal = switch (goalType) {
+            case LOSE     -> state.weightKg * 2.2;
+            case MAINTAIN -> state.weightKg * 1.8;
+            case GAIN     -> state.weightKg * 2.5;
+        };
+
+        // Remaining calories after protein → split 30% fat / rest carbs
+        double fatGoal  = (calorieGoal * 0.30) / 9;
+        double carbGoal = Math.max((calorieGoal - proteinGoal * 4 - fatGoal * 9) / 4, 0);
+
+        // Fiber goal (sex-based)
+        double fiberGoal = (state.sex == Sex.MALE) ? 38.0 : 25.0;
+
+        // Water goal (ml/day)
+        double waterGoal = state.weightKg * 35;
 
         User user = new User();
         user.setTelegramId(telegramId);
@@ -234,12 +275,15 @@ public class OnboardingService {
         user.setAge(state.age);
         user.setWeightKg(state.weightKg);
         user.setHeightCm(state.heightCm);
+        user.setSex(state.sex);
         user.setActivityLevel(state.activityLevel);
         user.setGoalType(goalType);
         user.setCalorieGoal(calorieGoal);
         user.setProteinGoal(proteinGoal);
         user.setCarbGoal(carbGoal);
         user.setFatGoal(fatGoal);
+        user.setFiberGoal(fiberGoal);
+        user.setWaterGoal(waterGoal);
         user.setLanguage(state.language == Language.RU ? "RU" : "EN");
         return user;
     }

@@ -10,4 +10,5 @@ public class NutritionResponse {
     private Double protein;
     private Double carbs;
     private Double fat;
+    private Double fiber;
 }

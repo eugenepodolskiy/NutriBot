@@ -67,10 +67,16 @@
 			<scope>test</scope>
 		</dependency>
 
+		<!-- telegrambots v9 — long-polling starter + OkHttp client -->
 		<dependency>
 			<groupId>org.telegram</groupId>
-			<artifactId>telegrambots-spring-boot-starter</artifactId>
-			<version>6.9.7.1</version>
+			<artifactId>telegrambots-springboot-longpolling-starter</artifactId>
+			<version>9.0.0</version>
+		</dependency>
+		<dependency>
+			<groupId>org.telegram</groupId>
+			<artifactId>telegrambots-client</artifactId>
+			<version>9.0.0</version>
 		</dependency>
 	</dependencies>
 

@@ -34,8 +34,7 @@ public class GeminiService {
 
     /**
      * Analyzes a food description with optional conversation context.
-     * If recentContext is non-empty its entries are appended to the system prompt
-     * so Gemini can resolve references like "the same thing as before".
+     * Returns a JSON object including fiber estimate.
      */
     public String ask(String prompt, List<String> recentContext) {
         String contextSection = recentContext.isEmpty() ? "" :
@@ -52,9 +51,11 @@ public class GeminiService {
                 "calories":number,
                 "protein":number,
                 "carbs":number,
-                "fat":number
+                "fat":number,
+                "fiber":number
                 }
                 Estimate all values based on the portion size described. If no weight is given, estimate a typical serving.
+                Estimate fiber content from typical values for that food. If unknown, use 0.
                 Detect the language of the user message and respond in that same language. JSON field names must always remain in English.
                 """ + contextSection;
         return callGemini(systemPrompt, prompt);
@@ -62,7 +63,7 @@ public class GeminiService {
 
     // ── Photo-based food analysis ──────────────────────────────────────────────
 
-    public String analyzePhoto(byte[] imageBytes) {
+    public String analyzePhoto(byte[] imageBytes, String hint) {
         String systemPrompt = """
                 You are a nutrition analysis API. Your only job is to analyze food visible in images and return nutritional data.
                 Respond ONLY with a raw JSON object. No markdown, no code blocks, no explanation, no extra text — just the JSON.
@@ -73,12 +74,18 @@ public class GeminiService {
                 "calories":number,
                 "protein":number,
                 "carbs":number,
-                "fat":number
+                "fat":number,
+                "fiber":number
                 }
                 Estimate all values based on the portion visible in the image. If unclear, estimate a typical serving.
+                Estimate fiber content from typical values for that food. If unknown, use 0.
                 JSON field names must always remain in English.
                 """;
         String textPrompt = "Identify the food in this image and estimate the portion size and nutritional content.";
+        if (hint != null && !hint.isBlank()) {
+            textPrompt += " The user described this food as: " + hint.trim() +
+                    ". Use this to help identify the food and estimate the portion size more accurately.";
+        }
         return callGeminiWithMedia(systemPrompt, imageBytes, "image/jpeg", textPrompt);
     }
 
@@ -118,21 +125,93 @@ public class GeminiService {
     // ── Intent detection ──────────────────────────────────────────────────────
 
     /**
-     * Classifies the user's intent. Returns one of: FOOD_LOG, SUGGESTION, CORRECTION, UNCLEAR.
+     * Classifies the user's intent. Returns one of:
+     * FOOD_LOG, SUGGESTION, CORRECTION, EDIT_LOG, HISTORY, SUPPLEMENT, PROFILE_UPDATE, UNCLEAR.
      * Falls back to FOOD_LOG on unexpected or empty response.
      */
     public String detectIntent(String text, String userLanguage) {
         String systemPrompt = """
                 Classify the intent of this message from a nutrition tracking app user.
-                Return exactly one word: FOOD_LOG if they are describing food they ate, SUGGESTION if they are asking for meal suggestions or what to eat, CORRECTION if they are correcting a previous entry, UNCLEAR if the message has nothing to do with food or nutrition.
-                Return only the word, nothing else.
+                Return exactly one word from the following list:
+                  FOOD_LOG       — user is describing food they ate or drank
+                  SUGGESTION     — user is asking for meal suggestions or what to eat next
+                  CORRECTION     — user wants to correct or change a pending food entry
+                  EDIT_LOG       — user wants to edit or update their most recent logged food entry
+                  HISTORY        — user wants to see their food history, past logs, or a summary of previous days
+                  SUPPLEMENT     — user is asking about supplements or vitamins (add, list, delete, mark taken, reminders)
+                  PROFILE_UPDATE — user wants to update their profile (weight, height, age, sex, activity level, or goal)
+                  UNCLEAR        — the message has nothing to do with food, nutrition, or profile management
+                Return only the single word, nothing else.
                 """;
         String userPrompt = "User language: " + userLanguage + "\nMessage: " + text;
         String result = callGemini(systemPrompt, userPrompt).trim().toUpperCase();
         return switch (result) {
-            case "FOOD_LOG", "SUGGESTION", "CORRECTION", "UNCLEAR" -> result;
+            case "FOOD_LOG", "SUGGESTION", "CORRECTION", "EDIT_LOG",
+                    "HISTORY", "SUPPLEMENT", "PROFILE_UPDATE", "UNCLEAR" -> result;
             default -> "FOOD_LOG";
         };
+    }
+
+    // ── Supplement action classification ──────────────────────────────────────
+
+    /**
+     * Classifies a supplement-related message into one of:
+     * ADD, LIST, DELETE, MARK_TAKEN.
+     * Falls back to LIST.
+     */
+    public String classifySupplementAction(String text) {
+        String systemPrompt = """
+                The user is managing their supplement/vitamin schedule in a nutrition app.
+                Classify their intent as exactly one word:
+                  ADD        — user wants to add a new supplement or vitamin
+                  LIST       — user wants to see their supplement list
+                  DELETE     — user wants to remove a supplement
+                  MARK_TAKEN — user wants to confirm they have taken a supplement
+                Return only the single word, nothing else.
+                """;
+        String result = callGemini(systemPrompt, text).trim().toUpperCase();
+        return switch (result) {
+            case "ADD", "LIST", "DELETE", "MARK_TAKEN" -> result;
+            default -> "LIST";
+        };
+    }
+
+    /**
+     * Extracts the supplement details from a natural-language "add supplement" request.
+     * Returns a JSON object: {"name":"...","dose":number,"unit":"...","reminderTimes":"HH:mm,HH:mm"}
+     * reminderTimes may be empty string if not mentioned.
+     */
+    public String extractSupplementDetails(String text) {
+        String systemPrompt = """
+                Extract supplement/vitamin details from the user's message.
+                Respond ONLY with a raw JSON object, no markdown, no explanation:
+                {
+                "name":"string",
+                "dose":number_or_null,
+                "unit":"mg|mcg|g|IU|string or empty",
+                "reminderTimes":"HH:mm,HH:mm or empty string"
+                }
+                If dose or unit is not mentioned, use null/empty. Convert time mentions to 24-hour HH:mm format.
+                """;
+        return callGemini(systemPrompt, text);
+    }
+
+    /**
+     * Extracts a user profile field update from natural language.
+     * Returns JSON: {"field":"weight|height|age|sex|activity|goal","value":"string"}
+     */
+    public String extractProfileUpdate(String text) {
+        String systemPrompt = """
+                The user wants to update their nutrition profile. Extract what they want to change.
+                Respond ONLY with a raw JSON object:
+                {
+                "field":"weight|height|age|sex|activity|goal",
+                "value":"string"
+                }
+                field must be exactly one of: weight, height, age, sex, activity, goal.
+                value is the new value as a string.
+                """;
+        return callGemini(systemPrompt, text);
     }
 
     // ── Classification helpers ─────────────────────────────────────────────────
@@ -198,11 +277,6 @@ public class GeminiService {
         return extractText(response);
     }
 
-    /**
-     * Sends a multimodal request containing an inline media part (image or audio)
-     * alongside a text prompt. systemPrompt may be null for requests that need no
-     * system instruction (e.g. plain audio transcription).
-     */
     private String callGeminiWithMedia(String systemPrompt, byte[] mediaBytes,
                                        String mimeType, String textPrompt) {
         String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey;

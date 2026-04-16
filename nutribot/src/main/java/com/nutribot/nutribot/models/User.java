@@ -2,6 +2,7 @@ package com.nutribot.nutribot.models;
 
 import com.nutribot.nutribot.enums.ActivityLevel;
 import com.nutribot.nutribot.enums.GoalType;
+import com.nutribot.nutribot.enums.Sex;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -28,6 +29,9 @@ public class User {
     private Double heightCm;
 
     @Enumerated(EnumType.STRING)
+    private Sex sex;
+
+    @Enumerated(EnumType.STRING)
     private ActivityLevel activityLevel;
 
     @Enumerated(EnumType.STRING)
@@ -37,6 +41,8 @@ public class User {
     private Double proteinGoal;
     private Double fatGoal;
     private Double carbGoal;
+    private Double fiberGoal;
+    private Double waterGoal;
 
     @Column(nullable = false)
     private String language = "EN";

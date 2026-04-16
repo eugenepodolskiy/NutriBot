@@ -35,6 +35,7 @@ public class FoodLog {
     private Double protein;
     private Double carbs;
     private Double fat;
+    private Double fiber;
 
     @Enumerated(EnumType.STRING)
     private LogSource source;

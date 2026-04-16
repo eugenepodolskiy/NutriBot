@@ -1,49 +1,47 @@
 package com.nutribot.nutribot.bot;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.objects.Message;
-import org.telegram.telegrambots.meta.bots.AbsSender;
+import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 /**
- * Thin wrapper around AbsSender so other services (e.g. ReminderService) can send
- * Telegram messages without creating a circular dependency on NutriBot itself.
- * NutriBot registers itself via @PostConstruct after Spring finishes wiring.
+ * Thin wrapper around TelegramClient so services (ReminderService, SupplementService, etc.)
+ * can send Telegram messages without a direct dependency on NutriBot.
+ * TelegramClient is injected as a Spring bean from BotConfig.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 public class TelegramMessageSender {
 
-    private AbsSender bot;
-
-    void register(AbsSender bot) {
-        this.bot = bot;
-    }
+    private final TelegramClient telegramClient;
 
     public void sendMessage(Long chatId, String text) {
-        if (bot == null) return;
-        SendMessage message = new SendMessage();
-        message.setChatId(chatId.toString());
-        message.setText(text);
+        SendMessage message = SendMessage.builder()
+                .chatId(chatId)
+                .text(text)
+                .build();
         try {
-            bot.execute(message);
+            telegramClient.execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("[TelegramMessageSender] chatId={} error: {}", chatId, e.getMessage(), e);
         }
     }
 
     /**
      * Executes the given SendMessage and returns the sent message's ID,
-     * or null if sending failed. Use this when the message ID is needed
-     * (e.g. to track which message a callback query refers to).
+     * or null if sending failed.
      */
     public Integer sendAndGetId(SendMessage message) {
-        if (bot == null) return null;
         try {
-            Message sent = bot.execute(message);
+            Message sent = telegramClient.execute(message);
             return sent != null ? sent.getMessageId() : null;
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("[TelegramMessageSender] sendAndGetId error: {}", e.getMessage(), e);
             return null;
         }
     }

@@ -1,7 +1,42 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs ls:*)"
+      "Bash(xargs ls:*)",
+      "Bash(./mvnw compile *)",
+      "Bash(./mvnw dependency:resolve -Dartifact=org.telegram:telegrambots-spring-boot-starter -U)",
+      "Bash(curl -s \"https://search.maven.org/solrsearch/select?q=g:org.telegram+a:telegrambots-spring-boot-starter&core=gav&rows=20&wt=json\")",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(d['v']\\) for d in data['response']['docs']]\")",
+      "Bash(sort -t'\"' -k3 -V)",
+      "Bash(curl -s \"https://search.maven.org/solrsearch/select?q=g:org.telegram+a:telegrambots-longpolling&core=gav&rows=20&wt=json\")",
+      "Bash(curl -s \"https://search.maven.org/solrsearch/select?q=g:org.telegram&core=gav&rows=50&wt=json\")",
+      "Bash(curl -s \"https://search.maven.org/solrsearch/select?q=g:org.telegram+a:telegrambots-client&core=gav&rows=20&wt=json\")",
+      "Bash(curl -s \"https://search.maven.org/solrsearch/select?q=g:org.telegram+a:telegrambots&core=gav&rows=20&wt=json\")",
+      "Bash(curl -s \"https://repo.maven.apache.org/maven2/org/telegram/\")",
+      "Bash(curl -s \"https://repo.maven.apache.org/maven2/org/telegram/telegrambots-springboot-longpolling-starter/\")",
+      "Bash(curl *)",
+      "Bash(jar tf *)",
+      "Read(//tmp/**)",
+      "Bash(unzip -l /tmp/tg-longpolling.jar)",
+      "Bash(unzip -l /tmp/tg-starter.jar)",
+      "Bash(unzip -l /tmp/tg-meta.jar)",
+      "Bash(unzip -l /tmp/tg-core.jar)",
+      "Bash(unzip -p /tmp/tg-starter.jar org/telegram/telegrambots/longpolling/starter/TelegramBotInitializer.class)",
+      "Bash(unzip -p /tmp/tg-longpolling.jar org/telegram/telegrambots/longpolling/TelegramBotsLongPollingApplication.class)",
+      "Bash(unzip -p /tmp/tg-longpolling.jar org/telegram/telegrambots/longpolling/BotSession.class)",
+      "Bash(unzip -o tg-longpolling.jar -d tg-lp/)",
+      "Bash(javap -classpath /tmp/tg-lp /tmp/tg-lp/org/telegram/telegrambots/longpolling/TelegramBotsLongPollingApplication.class)",
+      "Bash(grep -v \"^.$\\\\|^..$\")",
+      "Bash(unzip -o tg-starter.jar -d tg-starter/)",
+      "Bash(grep -v \"\\\\$\")",
+      "Read(//c/Program Files/Java/**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c//**)",
+      "Bash(export JAVA_HOME=\"/c/Users/Nastya/.jdks/openjdk-25.0.2\")",
+      "Bash(export PATH=\"$JAVA_HOME/bin:$PATH\")",
+      "Bash(java -version)",
+      "Bash(javac -version)",
+      "Bash(grep -E \"^\\\\\\\\[ERROR\\\\\\\\]|BUILD\")",
+      "Bash(JAVA_HOME=/c/Users/Nastya/.jdks/openjdk-25.0.2 ./mvnw compile)"
     ]
   }
 }

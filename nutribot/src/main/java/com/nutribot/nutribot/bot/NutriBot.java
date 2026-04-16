@@ -2,62 +2,76 @@ package com.nutribot.nutribot.bot;
 
 import com.nutribot.nutribot.dto.NutritionResponse;
 import com.nutribot.nutribot.enums.LogSource;
-import com.nutribot.nutribot.services.FoodLogService;
-import com.nutribot.nutribot.services.GeminiService;
-import com.nutribot.nutribot.services.OnboardingService;
-import com.nutribot.nutribot.services.PendingConfirmationService;
-import jakarta.annotation.PostConstruct;
+import com.nutribot.nutribot.services.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.longpolling.interfaces.LongPollingUpdateConsumer;
+import org.telegram.telegrambots.longpolling.starter.SpringLongPollingBot;
+import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.GetFile;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.File;
-import org.telegram.telegrambots.meta.api.objects.Message;
-import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.Voice;
+import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.api.objects.photo.PhotoSize;
+import org.telegram.telegrambots.meta.api.objects.reactions.MessageReactionUpdated;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.meta.generics.TelegramClient;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Set;
 
 @Slf4j
 @Component
-public class NutriBot extends TelegramLongPollingBot {
+public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUpdateConsumer {
 
-    private final GeminiService geminiService;
-    private final FoodLogService foodLogService;
-    private final OnboardingService onboardingService;
-    private final TelegramMessageSender messageSender;
+    private final TelegramClient            telegramClient;
+    private final GeminiService             geminiService;
+    private final FoodLogService            foodLogService;
+    private final OnboardingService         onboardingService;
+    private final TelegramMessageSender     messageSender;
     private final PendingConfirmationService pendingConfirmationService;
+    private final SupplementService         supplementService;
+    private final UserService               userService;
 
-    @Value("${telegram.bot.username}")
-    private String botUsername;
+    @Value("${telegram.bot.token}")
+    private String botToken;
 
-    public NutriBot(@Value("${telegram.bot.token}") String token,
+    public NutriBot(TelegramClient telegramClient,
                     GeminiService geminiService,
                     FoodLogService foodLogService,
                     OnboardingService onboardingService,
                     TelegramMessageSender messageSender,
-                    PendingConfirmationService pendingConfirmationService) {
-        super(token);
-        this.geminiService = geminiService;
-        this.foodLogService = foodLogService;
-        this.onboardingService = onboardingService;
-        this.messageSender = messageSender;
+                    PendingConfirmationService pendingConfirmationService,
+                    SupplementService supplementService,
+                    UserService userService) {
+        this.telegramClient           = telegramClient;
+        this.geminiService            = geminiService;
+        this.foodLogService           = foodLogService;
+        this.onboardingService        = onboardingService;
+        this.messageSender            = messageSender;
         this.pendingConfirmationService = pendingConfirmationService;
+        this.supplementService        = supplementService;
+        this.userService              = userService;
     }
 
-    @PostConstruct
-    public void register() {
-        messageSender.register(this);
+    @Override
+    public String getBotToken() {
+        return botToken;
+    }
+
+    @Override
+    public LongPollingUpdateConsumer getUpdatesConsumer() {
+        return this;
     }
 
     // ── Confirmation keyword sets ──────────────────────────────────────────────
@@ -72,22 +86,26 @@ public class NutriBot extends TelegramLongPollingBot {
             "wrong", "неверно", "incorrect", "не то", "не правильно"
     );
 
-    /** Strips trailing punctuation then lowercases — handles voice transcription artefacts. */
     private static String normalize(String text) {
         return text.trim().replaceAll("[.!?,;]+$", "").trim().toLowerCase();
     }
+
     // ── Update entry point ─────────────────────────────────────────────────────
 
     @Override
-    public void onUpdateReceived(Update update) {
+    public void consume(Update update) {
         if (update.hasCallbackQuery()) {
             handleCallbackQuery(update.getCallbackQuery());
             return;
         }
 
-        // TODO: message reactions require telegrambots 7.x (Bot API 7.0).
-        // Upgrade telegrambots-spring-boot-starter to 7.x and add:
-        //   if (update.hasMessageReaction()) { handleMessageReaction(...); return; }
+        // Feature 1: emoji reactions as confirmation (Bot API 7.0).
+        // Requires "message_reaction" in allowed_updates — configure via
+        // DefaultGetUpdatesGenerator or telegramUrl in TelegramBotsLongPollingApplication.
+        if (update.getMessageReaction() != null) {
+            handleMessageReaction(update.getMessageReaction());
+            return;
+        }
 
         if (!update.hasMessage()) return;
 
@@ -101,13 +119,36 @@ public class NutriBot extends TelegramLongPollingBot {
             String languageCode = message.getFrom() != null ? message.getFrom().getLanguageCode() : null;
             handleTextMessage(chatId, message.getText(), languageCode);
         } else if (message.hasPhoto()) {
-            handlePhotoMessage(chatId, message.getPhoto());
+            handlePhotoMessage(chatId, message.getPhoto(), message.getCaption());
         } else if (message.hasVoice()) {
             handleVoiceMessage(chatId, message.getVoice());
         }
     }
 
-    // ── Text handler (also called after voice transcription) ──────────────────
+    // ── Feature 1: message-reaction confirmation ───────────────────────────────
+
+    private void handleMessageReaction(MessageReactionUpdated reaction) {
+        if (reaction.getNewReaction() == null || reaction.getNewReaction().isEmpty()) return;
+
+        Long chatId   = reaction.getChat().getId();
+        Integer msgId = reaction.getMessageId();
+
+        if (!pendingConfirmationService.hasPending(chatId)) return;
+        PendingConfirmationService.PendingLog p = pendingConfirmationService.getPending(chatId);
+
+        if (p.getConfirmationMessageId() == null || !p.getConfirmationMessageId().equals(msgId)) return;
+
+        pendingConfirmationService.clear(chatId);
+        try {
+            String summary = foodLogService.confirmSave(chatId,
+                    p.getNutrition(), p.getLogSource(), p.getDescription());
+            messageSender.sendMessage(chatId, summary);
+        } catch (RuntimeException e) {
+            messageSender.sendMessage(chatId, e.getMessage());
+        }
+    }
+
+    // ── Text handler ───────────────────────────────────────────────────────────
 
     private void handleTextMessage(Long chatId, String text, String languageCode) {
         if (text.equals("/start")) {
@@ -133,13 +174,12 @@ public class NutriBot extends TelegramLongPollingBot {
             return;
         }
 
-        // ── Confirmation check (before intent detection) ───────────────────────
         if (pendingConfirmationService.hasPending(chatId)) {
             handlePendingResponse(chatId, text);
             return;
         }
 
-        String lang = foodLogService.getUserLanguage(chatId);
+        String lang   = foodLogService.getUserLanguage(chatId);
         String intent = geminiService.detectIntent(text, lang);
 
         switch (intent) {
@@ -153,6 +193,34 @@ public class NutriBot extends TelegramLongPollingBot {
             case "CORRECTION" -> messageSender.sendMessage(chatId, "RU".equals(lang)
                     ? "Нечего исправлять. Сначала опиши, что ты съел."
                     : "Nothing to correct. First tell me what you ate.");
+            case "EDIT_LOG" -> {
+                try {
+                    messageSender.sendMessage(chatId, foodLogService.editLastLog(chatId, text));
+                } catch (RuntimeException e) {
+                    messageSender.sendMessage(chatId, e.getMessage());
+                }
+            }
+            case "HISTORY" -> {
+                try {
+                    messageSender.sendMessage(chatId, foodLogService.getHistory(chatId, 7));
+                } catch (RuntimeException e) {
+                    messageSender.sendMessage(chatId, e.getMessage());
+                }
+            }
+            case "SUPPLEMENT" -> {
+                try {
+                    messageSender.sendMessage(chatId, supplementService.handleMessage(chatId, text, lang));
+                } catch (RuntimeException e) {
+                    messageSender.sendMessage(chatId, e.getMessage());
+                }
+            }
+            case "PROFILE_UPDATE" -> {
+                try {
+                    messageSender.sendMessage(chatId, userService.handleProfileUpdate(chatId, text, lang));
+                } catch (RuntimeException e) {
+                    messageSender.sendMessage(chatId, e.getMessage());
+                }
+            }
             case "UNCLEAR" -> messageSender.sendMessage(chatId, "RU".equals(lang)
                     ? "Я помогаю отслеживать питание. Напиши, что ты съел, или спроси, что поесть."
                     : "I help track nutrition. Tell me what you ate, or ask for meal suggestions.");
@@ -184,7 +252,6 @@ public class NutriBot extends TelegramLongPollingBot {
                     : "Cancelled. Describe the food differently and I'll try again.");
 
         } else {
-            // Treat as a correction — re-analyse with the new description
             try {
                 NutritionResponse corrected = foodLogService.parseText(chatId, text);
                 pendingConfirmationService.store(chatId, corrected, LogSource.AI_DECOMPOSED, text);
@@ -198,14 +265,13 @@ public class NutriBot extends TelegramLongPollingBot {
 
     // ── Photo handler ──────────────────────────────────────────────────────────
 
-    private void handlePhotoMessage(Long chatId, List<PhotoSize> photos) {
+    private void handlePhotoMessage(Long chatId, List<PhotoSize> photos, String caption) {
         if (onboardingService.isOnboarding(chatId) || onboardingService.needsOnboarding(chatId)) {
             messageSender.sendMessage(chatId,
                     "Please complete your profile setup with /start before logging food photos.");
             return;
         }
 
-        // Telegram sends multiple sizes; last entry is highest resolution
         PhotoSize photo = photos.get(photos.size() - 1);
         byte[] imageBytes;
         try {
@@ -219,9 +285,10 @@ public class NutriBot extends TelegramLongPollingBot {
         }
 
         try {
-            NutritionResponse nutrition = foodLogService.parsePhoto(chatId, imageBytes);
+            NutritionResponse nutrition = foodLogService.parsePhoto(chatId, imageBytes, caption);
             String lang = foodLogService.getUserLanguage(chatId);
-            pendingConfirmationService.store(chatId, nutrition, LogSource.AI_DECOMPOSED, "photo");
+            String description = (caption != null && !caption.isBlank()) ? caption : "photo";
+            pendingConfirmationService.store(chatId, nutrition, LogSource.AI_DECOMPOSED, description);
             Integer msgId = messageSender.sendAndGetId(buildConfirmationSendMessage(chatId, lang, nutrition));
             pendingConfirmationService.getPending(chatId).setConfirmationMessageId(msgId);
         } catch (RuntimeException e) {
@@ -236,7 +303,7 @@ public class NutriBot extends TelegramLongPollingBot {
         try {
             byte[] audioBytes = downloadTelegramFile(voice.getFileId());
             String transcribed = geminiService.transcribeAudio(audioBytes);
-            log.info("VOICE: transcribed='{}'", transcribed);
+            log.info("VOICE transcribed='{}'", transcribed);
 
             if (transcribed == null || transcribed.isBlank()) {
                 String lang = foodLogService.getUserLanguage(chatId);
@@ -246,38 +313,13 @@ public class NutriBot extends TelegramLongPollingBot {
                 return;
             }
 
-            boolean hasPending = pendingConfirmationService.hasPending(chatId);
-            log.info("VOICE: hasPending={}", hasPending);
-            if (hasPending) {
-                log.info("VOICE: routing to handlePendingResponse");
+            if (pendingConfirmationService.hasPending(chatId)) {
                 handlePendingResponse(chatId, transcribed);
                 return;
             }
 
-            if (onboardingService.isOnboarding(chatId) || onboardingService.needsOnboarding(chatId)) {
-                handleTextMessage(chatId, transcribed, null);
-                return;
-            }
+            handleTextMessage(chatId, transcribed, null);
 
-            String lang = foodLogService.getUserLanguage(chatId);
-            String intent = geminiService.detectIntent(transcribed, lang);
-            log.info("VOICE: intent={}", intent);
-            switch (intent) {
-                case "SUGGESTION" -> {
-                    try {
-                        messageSender.sendMessage(chatId, foodLogService.getSuggestions(chatId, transcribed));
-                    } catch (RuntimeException e) {
-                        messageSender.sendMessage(chatId, e.getMessage());
-                    }
-                }
-                case "CORRECTION" -> messageSender.sendMessage(chatId, "RU".equals(lang)
-                        ? "Нечего исправлять. Сначала опиши, что ты съел."
-                        : "Nothing to correct. First tell me what you ate.");
-                case "UNCLEAR" -> messageSender.sendMessage(chatId, "RU".equals(lang)
-                        ? "Я помогаю отслеживать питание. Напиши, что ты съел, или спроси, что поесть."
-                        : "I help track nutrition. Tell me what you ate, or ask for meal suggestions.");
-                default -> analyzeAndStorePending(chatId, transcribed); // FOOD_LOG
-            }
         } catch (Exception e) {
             log.error("[handleVoiceMessage] chatId={} error: {}", chatId, e.getMessage(), e);
             String lang = foodLogService.getUserLanguage(chatId);
@@ -289,11 +331,6 @@ public class NutriBot extends TelegramLongPollingBot {
 
     // ── Shared analysis helper ─────────────────────────────────────────────────
 
-    /**
-     * Parses a food description, stores the result as pending, and sends the
-     * confirmation message. Used by both the text and voice (via handleTextMessage)
-     * paths.
-     */
     private void analyzeAndStorePending(Long chatId, String description) {
         try {
             NutritionResponse nutrition = foodLogService.parseText(chatId, description);
@@ -313,10 +350,10 @@ public class NutriBot extends TelegramLongPollingBot {
         String data  = query.getData();
         String lang  = foodLogService.getUserLanguage(chatId);
 
-        // Acknowledge the button press so Telegram removes the loading spinner
-        AnswerCallbackQuery ack = new AnswerCallbackQuery();
-        ack.setCallbackQueryId(query.getId());
-        try { execute(ack); } catch (TelegramApiException ignored) {}
+        AnswerCallbackQuery ack = AnswerCallbackQuery.builder()
+                .callbackQueryId(query.getId())
+                .build();
+        try { telegramClient.execute(ack); } catch (TelegramApiException ignored) {}
 
         if ("confirm".equals(data)) {
             if (!pendingConfirmationService.hasPending(chatId)) {
@@ -345,59 +382,55 @@ public class NutriBot extends TelegramLongPollingBot {
 
     // ── Confirmation message builders ──────────────────────────────────────────
 
-    /** Builds a SendMessage with the nutrition summary and confirm/cancel inline keyboard. */
     private static SendMessage buildConfirmationSendMessage(Long chatId, String lang, NutritionResponse n) {
-        InlineKeyboardButton yesBtn = new InlineKeyboardButton();
-        yesBtn.setText("RU".equals(lang) ? "Да, верно" : "Yes, correct");
-        yesBtn.setCallbackData("confirm");
+        InlineKeyboardButton yesBtn = InlineKeyboardButton.builder()
+                .text("RU".equals(lang) ? "Да, верно" : "Yes, correct")
+                .callbackData("confirm")
+                .build();
 
-        InlineKeyboardButton noBtn = new InlineKeyboardButton();
-        noBtn.setText("RU".equals(lang) ? "Нет, отмена" : "No, cancel");
-        noBtn.setCallbackData("cancel");
+        InlineKeyboardButton noBtn = InlineKeyboardButton.builder()
+                .text("RU".equals(lang) ? "Нет, отмена" : "No, cancel")
+                .callbackData("cancel")
+                .build();
 
-        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
-        keyboard.setKeyboard(List.of(List.of(yesBtn, noBtn)));
+        InlineKeyboardMarkup keyboard = InlineKeyboardMarkup.builder()
+                .keyboardRow(new InlineKeyboardRow(yesBtn, noBtn))
+                .build();
 
-        SendMessage msg = new SendMessage();
-        msg.setChatId(chatId.toString());
-        msg.setText(buildConfirmationText(lang, n));
-        msg.setReplyMarkup(keyboard);
-        return msg;
+        return SendMessage.builder()
+                .chatId(chatId)
+                .text(buildConfirmationText(lang, n))
+                .replyMarkup(keyboard)
+                .build();
     }
 
-    /** Nutrition summary text without any yes/no instruction — the keyboard buttons replace that. */
     private static String buildConfirmationText(String lang, NutritionResponse n) {
         double grams    = n.getGrams()    != null ? n.getGrams()    : 0;
         double calories = n.getCalories() != null ? n.getCalories() : 0;
         double protein  = n.getProtein()  != null ? n.getProtein()  : 0;
         double carbs    = n.getCarbs()    != null ? n.getCarbs()    : 0;
         double fat      = n.getFat()      != null ? n.getFat()      : 0;
+        double fiber    = n.getFiber()    != null ? n.getFiber()    : 0;
         String name     = n.getFoodName() != null ? n.getFoodName() : "Unknown";
 
         if ("RU".equals(lang)) {
             return String.format(
-                    "Я нашёл: %s (%.0fг)%nКалории: %.0f ккал | Белки: %.0fг | Углеводы: %.0fг | Жиры: %.0fг",
-                    name, grams, calories, protein, carbs, fat);
+                    "Я нашёл: %s (%.0fг)%nКалории: %.0f ккал | Белки: %.0fг | Углеводы: %.0fг | Жиры: %.0fг | Клетчатка: %.0fг",
+                    name, grams, calories, protein, carbs, fat, fiber);
         } else {
             return String.format(
-                    "Found: %s (%.0fg)%nCalories: %.0f kcal | Protein: %.0fg | Carbs: %.0fg | Fat: %.0fg",
-                    name, grams, calories, protein, carbs, fat);
+                    "Found: %s (%.0fg)%nCalories: %.0f kcal | Protein: %.0fg | Carbs: %.0fg | Fat: %.0fg | Fiber: %.0fg",
+                    name, grams, calories, protein, carbs, fat, fiber);
         }
     }
 
     // ── File download helper ───────────────────────────────────────────────────
 
-    private byte[] downloadTelegramFile(String fileId) throws TelegramApiException, java.io.IOException {
-        File telegramFile = execute(new GetFile(fileId));
-        try (InputStream stream = downloadFileAsStream(telegramFile)) {
+    private byte[] downloadTelegramFile(String fileId) throws TelegramApiException, IOException {
+        GetFile getFileMethod = GetFile.builder().fileId(fileId).build();
+        File telegramFile = telegramClient.execute(getFileMethod);
+        try (InputStream stream = telegramClient.downloadFileAsStream(telegramFile)) {
             return stream.readAllBytes();
         }
-    }
-
-    // ── Bot identity ───────────────────────────────────────────────────────────
-
-    @Override
-    public String getBotUsername() {
-        return botUsername;
     }
 }

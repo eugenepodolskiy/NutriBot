@@ -16,7 +16,7 @@ spring:
 telegram:
   bot:
     token: ${TELEGRAM_BOT_TOKEN}
-    username: ${TELEGRAM_BOT_USERNAME}
+    username: ${TELEGRAM_BOT_USERNAME:}   # optional in v7 — token alone identifies the bot
 
 gemini:
   api:
