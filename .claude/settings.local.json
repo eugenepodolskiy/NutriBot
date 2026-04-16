@@ -36,7 +36,9 @@
       "Bash(java -version)",
       "Bash(javac -version)",
       "Bash(grep -E \"^\\\\\\\\[ERROR\\\\\\\\]|BUILD\")",
-      "Bash(JAVA_HOME=/c/Users/Nastya/.jdks/openjdk-25.0.2 ./mvnw compile)"
+      "Bash(JAVA_HOME=/c/Users/Nastya/.jdks/openjdk-25.0.2 ./mvnw compile)",
+      "Bash(cp /c/Users/Nastya/.m2/repository/org/telegram/telegrambots-meta/9.0.0/telegrambots-meta-9.0.0.jar .)",
+      "Bash(unzip -l telegrambots-meta-9.0.0.jar)"
     ]
   }
 }

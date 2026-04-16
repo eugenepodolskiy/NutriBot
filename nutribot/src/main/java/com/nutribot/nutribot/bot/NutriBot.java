@@ -5,6 +5,7 @@ import com.nutribot.nutribot.enums.LogSource;
 import com.nutribot.nutribot.services.*;
 import com.nutribot.nutribot.services.ManagementService;
 import com.nutribot.nutribot.services.ManagementStateService;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -13,11 +14,13 @@ import org.telegram.telegrambots.longpolling.starter.SpringLongPollingBot;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.GetFile;
+import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.File;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.Voice;
+import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.photo.PhotoSize;
 import org.telegram.telegrambots.meta.api.objects.reactions.MessageReactionUpdated;
@@ -70,6 +73,26 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
         this.userService                = userService;
         this.managementService          = managementService;
         this.managementStateService     = managementStateService;
+    }
+
+    @PostConstruct
+    public void registerCommands() {
+        List<BotCommand> commands = List.of(
+                BotCommand.builder().command("start").description("Start or restart profile setup").build(),
+                BotCommand.builder().command("log").description("Log a meal (or just type what you ate)").build(),
+                BotCommand.builder().command("today").description("View today's food log").build(),
+                BotCommand.builder().command("history").description("7-day nutrition history").build(),
+                BotCommand.builder().command("suggest").description("Get meal suggestions based on remaining goals").build(),
+                BotCommand.builder().command("supplements").description("View my supplements").build(),
+                BotCommand.builder().command("goals").description("View my daily nutrition goals").build(),
+                BotCommand.builder().command("manage").description("Manage data & profile").build()
+        );
+        try {
+            telegramClient.execute(SetMyCommands.builder().commands(commands).build());
+            log.info("Bot commands registered successfully");
+        } catch (TelegramApiException e) {
+            log.error("Failed to register bot commands: {}", e.getMessage(), e);
+        }
     }
 
     @Override
@@ -185,6 +208,59 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
         if (text.equals("/manage")) {
             String lang = foodLogService.getUserLanguage(chatId);
             messageSender.sendAndGetId(buildManageMenu(chatId, lang));
+            return;
+        }
+
+        if (text.equals("/today")) {
+            try {
+                messageSender.sendMessage(chatId, foodLogService.getRecentLogs(chatId));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+            return;
+        }
+
+        if (text.equals("/history")) {
+            try {
+                messageSender.sendMessage(chatId, foodLogService.getHistory(chatId, 7));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+            return;
+        }
+
+        if (text.equals("/suggest")) {
+            try {
+                messageSender.sendMessage(chatId, foodLogService.getSuggestions(chatId, "suggest a healthy meal for me"));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+            return;
+        }
+
+        if (text.equals("/supplements")) {
+            try {
+                messageSender.sendMessage(chatId, managementService.viewSupplements(chatId));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+            return;
+        }
+
+        if (text.equals("/goals")) {
+            try {
+                messageSender.sendMessage(chatId, managementService.viewGoals(chatId));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+            return;
+        }
+
+        if (text.equals("/log")) {
+            String lang = foodLogService.getUserLanguage(chatId);
+            messageSender.sendMessage(chatId, "RU".equals(lang)
+                    ? "Опиши, что ты съел, и я запишу. Например: «200г куриной грудки с рисом»."
+                    : "Describe what you ate and I'll log it. For example: \"200g chicken breast with rice\".");
             return;
         }
 
