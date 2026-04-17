@@ -161,13 +161,34 @@ public class GeminiService {
      */
     public String classifySupplementAction(String text) {
         String systemPrompt = """
-                The user is managing their supplement/vitamin schedule in a nutrition app.
-                Classify their intent as exactly one word:
-                  ADD          — user wants to add a new supplement or vitamin
-                  LIST         — user wants to see their supplement list
-                  DELETE       — user wants to permanently remove a supplement from their list
-                  MARK_TAKEN   — user wants to confirm they have taken a supplement today
-                  MARK_UNTAKEN — user says they did NOT take a supplement, or wants to uncheck/undo a taken mark
+                The user is managing their supplement/vitamin schedule in a nutrition tracking app.
+                Classify their message as exactly one of these words:
+
+                  ADD          — user wants to CREATE a new supplement entry in their tracking schedule.
+                                 Trigger words: "add", "добавь", "начать принимать", "хочу принимать",
+                                 "поставь напоминание", "start taking", "track", "remind me to take".
+                                 Examples: "Add vitamin D 1000 IU at 8am", "добавь омегу 3",
+                                 "хочу принимать кальций каждый день", "remind me to take magnesium".
+
+                  LIST         — user wants to view their existing supplement list.
+                                 Examples: "show my supplements", "мои добавки", "what vitamins do I take".
+
+                  DELETE       — user wants to permanently remove a supplement from their schedule.
+                                 Examples: "remove vitamin C", "удали омегу", "stop tracking zinc".
+
+                  MARK_TAKEN   — user is confirming they ALREADY CONSUMED a supplement that is in their list.
+                                 Trigger words: "took", "принял", "выпил", "just had", "I took".
+                                 Examples: "I took my vitamin D", "выпил омегу 3 и кальций",
+                                 "just had magnesium", "принял витамин".
+
+                  MARK_UNTAKEN — user says they did NOT take a supplement, or wants to undo a taken mark.
+                                 Trigger words: "didn't take", "не выпил", "не принял", "uncheck", "undo".
+                                 Examples: "I didn't take magnesium", "не выпил кальций", "uncheck omega 3".
+
+                KEY RULE: ADD = registering a supplement for future tracking. MARK_TAKEN = recording consumption
+                of a supplement that already exists in the schedule. When in doubt, prefer ADD for messages
+                that contain "добавь", "add", "начать", "start", "remind".
+
                 Return only the single word, nothing else.
                 """;
         String result = callGemini(systemPrompt, text).trim().toUpperCase();
