@@ -156,24 +156,46 @@ public class GeminiService {
 
     /**
      * Classifies a supplement-related message into one of:
-     * ADD, LIST, DELETE, MARK_TAKEN.
+     * ADD, LIST, DELETE, MARK_TAKEN, MARK_UNTAKEN.
      * Falls back to LIST.
      */
     public String classifySupplementAction(String text) {
         String systemPrompt = """
                 The user is managing their supplement/vitamin schedule in a nutrition app.
                 Classify their intent as exactly one word:
-                  ADD        — user wants to add a new supplement or vitamin
-                  LIST       — user wants to see their supplement list
-                  DELETE     — user wants to remove a supplement
-                  MARK_TAKEN — user wants to confirm they have taken a supplement
+                  ADD          — user wants to add a new supplement or vitamin
+                  LIST         — user wants to see their supplement list
+                  DELETE       — user wants to permanently remove a supplement from their list
+                  MARK_TAKEN   — user wants to confirm they have taken a supplement today
+                  MARK_UNTAKEN — user says they did NOT take a supplement, or wants to uncheck/undo a taken mark
                 Return only the single word, nothing else.
                 """;
         String result = callGemini(systemPrompt, text).trim().toUpperCase();
         return switch (result) {
-            case "ADD", "LIST", "DELETE", "MARK_TAKEN" -> result;
+            case "ADD", "LIST", "DELETE", "MARK_TAKEN", "MARK_UNTAKEN" -> result;
             default -> "LIST";
         };
+    }
+
+    /**
+     * Extracts a JSON array of supplement/vitamin names mentioned in the message.
+     * Returns a raw JSON array string, e.g. ["Vitamin D","Omega-3"].
+     * Returns "[]" if none found.
+     */
+    public String extractSupplementNames(String text) {
+        String systemPrompt = """
+                Extract all supplement and vitamin names mentioned in this message.
+                Respond ONLY with a raw JSON array of strings. No markdown, no explanation, no extra text.
+                Examples:
+                  Input: "I took calcium, omega 3 and vitamin D"
+                  Output: ["calcium","omega 3","vitamin D"]
+                  Input: "выпил магний"
+                  Output: ["магний"]
+                  Input: "took my vitamins"
+                  Output: ["vitamins"]
+                If no supplement names can be identified, return: []
+                """;
+        return callGemini(systemPrompt, text);
     }
 
     /**

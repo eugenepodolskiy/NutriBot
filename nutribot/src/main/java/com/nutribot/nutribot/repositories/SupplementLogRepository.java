@@ -17,6 +17,14 @@ public interface SupplementLogRepository extends JpaRepository<SupplementLog, Lo
             Long supplementId, Long userId, LocalDateTime start, LocalDateTime end);
 
     @Modifying
+    @Query("DELETE FROM SupplementLog sl WHERE sl.supplement.id = :supplementId AND sl.user.id = :userId AND sl.takenAt BETWEEN :start AND :end")
+    void deleteBySupplementIdAndUserIdAndTakenAtBetween(
+            @Param("supplementId") Long supplementId,
+            @Param("userId") Long userId,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
+
+    @Modifying
     @Query("DELETE FROM SupplementLog sl WHERE sl.user.id = :userId")
     void deleteAllByUserId(@Param("userId") Long userId);
 }

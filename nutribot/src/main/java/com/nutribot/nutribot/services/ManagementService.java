@@ -14,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -188,43 +190,67 @@ public class ManagementService {
         return onboardingService.start(telegramId, telegramLanguageCode);
     }
 
-    // ── 6. View current goals ─────────────────────────────────────────────────
+    // ── 6. View current goals with today's progress ───────────────────────────
 
     @Transactional(readOnly = true)
     public String viewGoals(Long telegramId) {
         User user = getUser(telegramId);
         String lang = user.getLanguage();
 
-        double cal   = user.getCalorieGoal()  != null ? user.getCalorieGoal()  : 0;
-        double prot  = user.getProteinGoal()  != null ? user.getProteinGoal()  : 0;
-        double carb  = user.getCarbGoal()     != null ? user.getCarbGoal()     : 0;
-        double fat   = user.getFatGoal()      != null ? user.getFatGoal()      : 0;
-        double fiber = user.getFiberGoal()    != null ? user.getFiberGoal()    : 0;
-        double water = user.getWaterGoal()    != null ? user.getWaterGoal()    : 0;
+        // Daily goals
+        double calGoal   = user.getCalorieGoal() != null ? user.getCalorieGoal() : 0;
+        double protGoal  = user.getProteinGoal() != null ? user.getProteinGoal() : 0;
+        double carbGoal  = user.getCarbGoal()    != null ? user.getCarbGoal()    : 0;
+        double fatGoal   = user.getFatGoal()     != null ? user.getFatGoal()     : 0;
+        double fiberGoal = user.getFiberGoal()   != null ? user.getFiberGoal()   : 0;
+        double waterGoal = user.getWaterGoal()   != null ? user.getWaterGoal()   : 0;
+
+        // Today's consumed totals (timezone-aware)
+        ZoneId zone = SupplementService.getZone(user.getTimezone());
+        LocalDateTime startUtc = LocalDate.now(zone).atStartOfDay(zone)
+                .withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+        LocalDateTime endUtc = startUtc.plusDays(1);
+
+        List<FoodLog> todayLogs = foodLogRepository.findByUserIdAndLoggedAtBetween(user.getId(), startUtc, endUtc);
+        double calEaten   = todayLogs.stream().mapToDouble(l -> l.getCalories() != null ? l.getCalories() : 0).sum();
+        double protEaten  = todayLogs.stream().mapToDouble(l -> l.getProtein()  != null ? l.getProtein()  : 0).sum();
+        double carbEaten  = todayLogs.stream().mapToDouble(l -> l.getCarbs()    != null ? l.getCarbs()    : 0).sum();
+        double fatEaten   = todayLogs.stream().mapToDouble(l -> l.getFat()      != null ? l.getFat()      : 0).sum();
+        double fiberEaten = todayLogs.stream().mapToDouble(l -> l.getFiber()    != null ? l.getFiber()    : 0).sum();
 
         String suppStatus = supplementService.getTodaySupplementStatus(user, lang);
 
         if (isRU(lang)) {
             String goals = String.format(
-                    "Ваши текущие ежедневные цели:\n\n" +
-                    "Калории:   %.0f ккал\n" +
-                    "Белки:     %.0f г\n" +
-                    "Углеводы:  %.0f г\n" +
-                    "Жиры:      %.0f г\n" +
-                    "Клетчатка: %.0f г\n" +
-                    "Вода:      %.0f мл",
-                    cal, prot, carb, fat, fiber, water);
+                    "Прогресс за сегодня:\n\n" +
+                    "Калории:   %.0f / %.0f ккал\n" +
+                    "Белки:     %.0f / %.0f г\n" +
+                    "Углеводы:  %.0f / %.0f г\n" +
+                    "Жиры:      %.0f / %.0f г\n" +
+                    "Клетчатка: %.0f / %.0f г\n" +
+                    "Вода:      цель %.0f мл/день",
+                    calEaten, calGoal,
+                    protEaten, protGoal,
+                    carbEaten, carbGoal,
+                    fatEaten, fatGoal,
+                    fiberEaten, fiberGoal,
+                    waterGoal);
             return suppStatus.isEmpty() ? goals : goals + "\n" + suppStatus;
         } else {
             String goals = String.format(
-                    "Your current daily goals:\n\n" +
-                    "Calories: %.0f kcal\n" +
-                    "Protein:  %.0f g\n" +
-                    "Carbs:    %.0f g\n" +
-                    "Fat:      %.0f g\n" +
-                    "Fiber:    %.0f g\n" +
-                    "Water:    %.0f ml",
-                    cal, prot, carb, fat, fiber, water);
+                    "Today's progress:\n\n" +
+                    "Calories: %.0f / %.0f kcal\n" +
+                    "Protein:  %.0f / %.0f g\n" +
+                    "Carbs:    %.0f / %.0f g\n" +
+                    "Fat:      %.0f / %.0f g\n" +
+                    "Fiber:    %.0f / %.0f g\n" +
+                    "Water:    goal %.0f ml/day",
+                    calEaten, calGoal,
+                    protEaten, protGoal,
+                    carbEaten, carbGoal,
+                    fatEaten, fatGoal,
+                    fiberEaten, fiberGoal,
+                    waterGoal);
             return suppStatus.isEmpty() ? goals : goals + "\n" + suppStatus;
         }
     }

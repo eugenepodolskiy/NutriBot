@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -39,10 +40,11 @@ public class SupplementService {
         User user = getUser(telegramId);
         String action = geminiService.classifySupplementAction(text);
         return switch (action) {
-            case "ADD"        -> addSupplementFromText(user, text, lang);
-            case "DELETE"     -> deleteSupplementFromText(user, text, lang);
-            case "MARK_TAKEN" -> markTakenFromText(user, text, lang);
-            default           -> listSupplements(user, lang);
+            case "ADD"          -> addSupplementFromText(user, text, lang);
+            case "DELETE"       -> deleteSupplementFromText(user, text, lang);
+            case "MARK_TAKEN"   -> markTakenFromText(user, text, lang);
+            case "MARK_UNTAKEN" -> markUntakenFromText(user, text, lang);
+            default             -> listSupplements(user, lang);
         };
     }
 
@@ -152,34 +154,100 @@ public class SupplementService {
     // ── Mark taken (natural text path) ─────────────────────────────────────────
 
     private String markTakenFromText(User user, String text, String lang) {
-        String json = geminiService.extractSupplementDetails(text);
-        String name = null;
-        try {
-            Map<?, ?> parsed = objectMapper.readValue(json, Map.class);
-            name = (String) parsed.get("name");
-        } catch (Exception ignored) {}
+        List<String> names = extractNames(text);
 
-        if (name == null || name.isBlank()) {
-            // Mark all active supplements as taken
-            List<Supplement> all = supplementRepository.findByUserIdAndActiveTrue(user.getId());
-            LocalDateTime now = LocalDateTime.now();
-            for (Supplement s : all) {
-                logSupplementTaken(s, user, now);
-            }
-            return isRU(lang) ? "Все добавки отмечены как принятые!" : "All supplements marked as taken!";
-        }
-
-        String n = name.trim();
-        Optional<Supplement> opt = supplementRepository.findFirstByUserIdAndNameIgnoreCaseAndActiveTrue(user.getId(), n);
-        if (opt.isEmpty()) {
+        if (names.isEmpty()) {
             return isRU(lang)
-                    ? "Добавка «" + n + "» не найдена."
-                    : "Supplement \"" + n + "\" not found.";
+                    ? "Укажите, какую добавку вы приняли."
+                    : "Please specify which supplement(s) you took.";
         }
-        logSupplementTaken(opt.get(), user, LocalDateTime.now());
-        return isRU(lang)
-                ? "Отлично! " + opt.get().getName() + " отмечен(а) как принятый(ая)!"
-                : "Great! " + opt.get().getName() + " marked as taken!";
+
+        List<String> found    = new ArrayList<>();
+        List<String> notFound = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+
+        for (String name : names) {
+            Optional<Supplement> opt = supplementRepository
+                    .findFirstByUserIdAndNameIgnoreCaseAndActiveTrue(user.getId(), name.trim());
+            if (opt.isPresent()) {
+                logSupplementTaken(opt.get(), user, now);
+                found.add(opt.get().getName());
+            } else {
+                notFound.add(name);
+            }
+        }
+
+        if (found.isEmpty()) {
+            return isRU(lang)
+                    ? "Не удалось найти упомянутые добавки. Уточните название."
+                    : "None of the mentioned supplements were found. Please clarify.";
+        }
+
+        String result = isRU(lang)
+                ? "Отмечено как принятое: " + String.join(", ", found) + "!"
+                : "Marked as taken: " + String.join(", ", found) + "!";
+        if (!notFound.isEmpty()) {
+            result += "\n" + (isRU(lang) ? "Не найдено: " : "Not found: ") + String.join(", ", notFound);
+        }
+        return result;
+    }
+
+    // ── Mark untaken (undo) ────────────────────────────────────────────────────
+
+    private String markUntakenFromText(User user, String text, String lang) {
+        List<String> names = extractNames(text);
+
+        if (names.isEmpty()) {
+            return isRU(lang)
+                    ? "Укажите, какую добавку нужно отменить."
+                    : "Please specify which supplement(s) to uncheck.";
+        }
+
+        ZoneId zone = getZone(user.getTimezone());
+        LocalDateTime startUtc = LocalDate.now(zone).atStartOfDay(zone)
+                .withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+        LocalDateTime endUtc = startUtc.plusDays(1);
+
+        List<String> unchecked = new ArrayList<>();
+        List<String> notFound  = new ArrayList<>();
+
+        for (String name : names) {
+            Optional<Supplement> opt = supplementRepository
+                    .findFirstByUserIdAndNameIgnoreCaseAndActiveTrue(user.getId(), name.trim());
+            if (opt.isPresent()) {
+                supplementLogRepository.deleteBySupplementIdAndUserIdAndTakenAtBetween(
+                        opt.get().getId(), user.getId(), startUtc, endUtc);
+                unchecked.add(opt.get().getName());
+            } else {
+                notFound.add(name);
+            }
+        }
+
+        if (unchecked.isEmpty()) {
+            return isRU(lang)
+                    ? "Не удалось найти упомянутые добавки."
+                    : "None of the mentioned supplements were found.";
+        }
+
+        String result = isRU(lang)
+                ? "Снято: " + String.join(", ", unchecked)
+                : "Unchecked: " + String.join(", ", unchecked);
+        if (!notFound.isEmpty()) {
+            result += "\n" + (isRU(lang) ? "Не найдено: " : "Not found: ") + String.join(", ", notFound);
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> extractNames(String text) {
+        String json = geminiService.extractSupplementNames(text);
+        try {
+            List<String> names = objectMapper.readValue(json, List.class);
+            return names != null ? names : List.of();
+        } catch (Exception e) {
+            log.warn("[SupplementService] extractNames parse failed for json={}", json);
+            return List.of();
+        }
     }
 
     // ── Log taken (called from callback button handler in NutriBot) ────────────
