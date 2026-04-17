@@ -25,6 +25,7 @@ public class FoodLogService {
     private final UserRepository userRepository;
     private final GeminiService geminiService;
     private final ConversationContextService conversationContextService;
+    private final SupplementService supplementService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -72,7 +73,9 @@ public class FoodLogService {
         conversationContextService.push(telegramId, contextEntry);
 
         List<FoodLog> todayLogs = getTodayLogs(user.getId());
-        return buildSummary(user, nutrition, totals(todayLogs), false);
+        String summary = buildSummary(user, nutrition, totals(todayLogs), false);
+        String suppStatus = supplementService.getTodaySupplementStatus(user, user.getLanguage());
+        return suppStatus.isEmpty() ? summary : summary + "\n" + suppStatus;
     }
 
     // ── Feature 3: Edit last log ───────────────────────────────────────────────
@@ -103,7 +106,9 @@ public class FoodLogService {
         foodLogRepository.save(log);
 
         List<FoodLog> todayLogs = getTodayLogs(user.getId());
-        return buildSummary(user, nutrition, totals(todayLogs), true);
+        String summary = buildSummary(user, nutrition, totals(todayLogs), true);
+        String suppStatus = supplementService.getTodaySupplementStatus(user, user.getLanguage());
+        return suppStatus.isEmpty() ? summary : summary + "\n" + suppStatus;
     }
 
     // ── Feature 3: Recent logs ─────────────────────────────────────────────────

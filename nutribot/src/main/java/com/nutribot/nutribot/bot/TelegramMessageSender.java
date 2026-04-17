@@ -32,6 +32,14 @@ public class TelegramMessageSender {
         }
     }
 
+    public void send(SendMessage message) {
+        try {
+            telegramClient.execute(message);
+        } catch (TelegramApiException e) {
+            log.error("[TelegramMessageSender] send error: {}", e.getMessage(), e);
+        }
+    }
+
     /**
      * Executes the given SendMessage and returns the sent message's ID,
      * or null if sending failed.

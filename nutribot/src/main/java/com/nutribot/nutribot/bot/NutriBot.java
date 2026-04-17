@@ -524,6 +524,17 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
             } catch (RuntimeException e) {
                 messageSender.sendMessage(chatId, e.getMessage());
             }
+
+        } else if (data != null && data.startsWith("supp_taken:")) {
+            try {
+                long supplementId = Long.parseLong(data.substring("supp_taken:".length()));
+                messageSender.sendMessage(chatId, supplementService.logTaken(supplementId, chatId));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+
+        } else if (data != null && data.startsWith("supp_skip:")) {
+            messageSender.sendMessage(chatId, "RU".equals(lang) ? "Хорошо, пропущено." : "OK, skipped.");
         }
     }
 

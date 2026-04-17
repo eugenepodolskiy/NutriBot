@@ -15,6 +15,8 @@ public interface SupplementRepository extends JpaRepository<Supplement, Long> {
 
     List<Supplement> findByUserId(Long userId);
 
+    List<Supplement> findAllByActiveTrue();
+
     Optional<Supplement> findFirstByUserIdAndNameIgnoreCaseAndActiveTrue(Long userId, String name);
 
     /** Find all active supplements whose reminder_times contain the given HH:mm token. */

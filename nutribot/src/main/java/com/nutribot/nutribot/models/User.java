@@ -47,6 +47,9 @@ public class User {
     @Column(nullable = false)
     private String language = "EN";
 
+    @Column(nullable = false)
+    private String timezone = "UTC";
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 }

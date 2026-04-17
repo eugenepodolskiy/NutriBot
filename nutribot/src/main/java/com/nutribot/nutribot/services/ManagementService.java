@@ -4,6 +4,7 @@ import com.nutribot.nutribot.models.FoodLog;
 import com.nutribot.nutribot.models.Supplement;
 import com.nutribot.nutribot.models.User;
 import com.nutribot.nutribot.repositories.FoodLogRepository;
+import com.nutribot.nutribot.repositories.SupplementLogRepository;
 import com.nutribot.nutribot.repositories.SupplementRepository;
 import com.nutribot.nutribot.repositories.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -21,11 +22,13 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class ManagementService {
 
-    private final FoodLogRepository    foodLogRepository;
-    private final SupplementRepository supplementRepository;
-    private final UserRepository       userRepository;
-    private final OnboardingService    onboardingService;
-    private final ManagementStateService managementStateService;
+    private final FoodLogRepository       foodLogRepository;
+    private final SupplementRepository    supplementRepository;
+    private final SupplementLogRepository supplementLogRepository;
+    private final SupplementService       supplementService;
+    private final UserRepository          userRepository;
+    private final OnboardingService       onboardingService;
+    private final ManagementStateService  managementStateService;
 
     // ── 1. Delete last food log entry for today ────────────────────────────────
 
@@ -176,6 +179,7 @@ public class ManagementService {
         if (userOpt.isPresent()) {
             Long userId = userOpt.get().getId();
             foodLogRepository.deleteAllByUserId(userId);
+            supplementLogRepository.deleteAllByUserId(userId);
             supplementRepository.deleteAllByUserId(userId);
             userRepository.delete(userOpt.get());
             userRepository.flush();
@@ -198,8 +202,10 @@ public class ManagementService {
         double fiber = user.getFiberGoal()    != null ? user.getFiberGoal()    : 0;
         double water = user.getWaterGoal()    != null ? user.getWaterGoal()    : 0;
 
+        String suppStatus = supplementService.getTodaySupplementStatus(user, lang);
+
         if (isRU(lang)) {
-            return String.format(
+            String goals = String.format(
                     "Ваши текущие ежедневные цели:\n\n" +
                     "Калории:   %.0f ккал\n" +
                     "Белки:     %.0f г\n" +
@@ -208,8 +214,9 @@ public class ManagementService {
                     "Клетчатка: %.0f г\n" +
                     "Вода:      %.0f мл",
                     cal, prot, carb, fat, fiber, water);
+            return suppStatus.isEmpty() ? goals : goals + "\n" + suppStatus;
         } else {
-            return String.format(
+            String goals = String.format(
                     "Your current daily goals:\n\n" +
                     "Calories: %.0f kcal\n" +
                     "Protein:  %.0f g\n" +
@@ -218,6 +225,7 @@ public class ManagementService {
                     "Fiber:    %.0f g\n" +
                     "Water:    %.0f ml",
                     cal, prot, carb, fat, fiber, water);
+            return suppStatus.isEmpty() ? goals : goals + "\n" + suppStatus;
         }
     }
 

@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -17,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class OnboardingService {
 
     private enum Step {
-        NAME, AGE, WEIGHT, HEIGHT, SEX, ACTIVITY, GOAL
+        NAME, AGE, WEIGHT, HEIGHT, SEX, ACTIVITY, GOAL, TIMEZONE
     }
 
     private enum Language {
@@ -25,14 +26,16 @@ public class OnboardingService {
     }
 
     private static class State {
-        Step     step         = Step.NAME;
-        Language language     = Language.EN;
-        String   name;
-        int      age;
-        double   weightKg;
-        double   heightCm;
-        Sex      sex;
+        Step          step         = Step.NAME;
+        Language      language     = Language.EN;
+        String        name;
+        int           age;
+        double        weightKg;
+        double        heightCm;
+        Sex           sex;
         ActivityLevel activityLevel;
+        GoalType      goalType;
+        String        timezone     = "UTC";
     }
 
     private final Map<Long, State> sessions = new ConcurrentHashMap<>();
@@ -175,7 +178,32 @@ public class OnboardingService {
                 } catch (IllegalArgumentException e) {
                     goalType = geminiService.classifyGoal(input);
                 }
-                User user = buildUser(telegramId, state, goalType);
+                state.goalType = goalType;
+                state.step = Step.TIMEZONE;
+                yield msg(state.language,
+                        "Almost done! What's your UTC timezone offset?\n" +
+                        "Enter a number like +3, -5, or 0 for UTC.\n" +
+                        "(Example: Moscow is +3, New York is -5, London is 0)",
+                        "Почти готово! Укажите ваш часовой пояс (смещение UTC).\n" +
+                        "Введите число, например +3, -5 или 0 для UTC.\n" +
+                        "(Например: Москва +3, Нью-Йорк -5, Лондон 0)");
+            }
+            case TIMEZONE -> {
+                String input = text.trim();
+                int offset;
+                try {
+                    String numStr = input.startsWith("+") ? input.substring(1) : input;
+                    offset = Integer.parseInt(numStr);
+                } catch (NumberFormatException e) {
+                    yield msg(state.language,
+                            "Please enter your UTC offset as a number, e.g. +3, -5, or 0.",
+                            "Введите смещение UTC числом, например +3, -5 или 0.");
+                }
+                if (offset < -12 || offset > 14) yield msg(state.language,
+                        "Please enter a valid UTC offset between -12 and +14.",
+                        "Введите корректное смещение UTC от -12 до +14.");
+                state.timezone = (offset == 0) ? "UTC" : ZoneOffset.ofHours(offset).getId();
+                User user = buildUser(telegramId, state);
                 userRepository.save(user);
                 Language lang = state.language;
                 String name = state.name;
@@ -225,7 +253,7 @@ public class OnboardingService {
         return lang == Language.RU ? ru : en;
     }
 
-    private User buildUser(Long telegramId, State state, GoalType goalType) {
+    private User buildUser(Long telegramId, State state) {
         // Sex-specific Mifflin-St Jeor BMR
         double bmr;
         if (state.sex == Sex.MALE) {
@@ -233,7 +261,6 @@ public class OnboardingService {
         } else if (state.sex == Sex.FEMALE) {
             bmr = 10 * state.weightKg + 6.25 * state.heightCm - 5 * state.age - 161;
         } else {
-            // Unisex fallback (midpoint of male and female constants)
             bmr = 10 * state.weightKg + 6.25 * state.heightCm - 5 * state.age - 78;
         }
 
@@ -246,27 +273,21 @@ public class OnboardingService {
 
         double tdee = bmr * activityMultiplier;
 
-        double calorieGoal = switch (goalType) {
+        double calorieGoal = switch (state.goalType) {
             case LOSE     -> tdee * 0.85;
             case MAINTAIN -> tdee;
             case GAIN     -> tdee * 1.10;
         };
 
-        // Weight-based protein goal
-        double proteinGoal = switch (goalType) {
+        double proteinGoal = switch (state.goalType) {
             case LOSE     -> state.weightKg * 2.2;
             case MAINTAIN -> state.weightKg * 1.8;
             case GAIN     -> state.weightKg * 2.5;
         };
 
-        // Remaining calories after protein → split 30% fat / rest carbs
         double fatGoal  = (calorieGoal * 0.30) / 9;
         double carbGoal = Math.max((calorieGoal - proteinGoal * 4 - fatGoal * 9) / 4, 0);
-
-        // Fiber goal (sex-based)
         double fiberGoal = (state.sex == Sex.MALE) ? 38.0 : 25.0;
-
-        // Water goal (ml/day)
         double waterGoal = state.weightKg * 35;
 
         User user = new User();
@@ -277,7 +298,7 @@ public class OnboardingService {
         user.setHeightCm(state.heightCm);
         user.setSex(state.sex);
         user.setActivityLevel(state.activityLevel);
-        user.setGoalType(goalType);
+        user.setGoalType(state.goalType);
         user.setCalorieGoal(calorieGoal);
         user.setProteinGoal(proteinGoal);
         user.setCarbGoal(carbGoal);
@@ -285,6 +306,7 @@ public class OnboardingService {
         user.setFiberGoal(fiberGoal);
         user.setWaterGoal(waterGoal);
         user.setLanguage(state.language == Language.RU ? "RU" : "EN");
+        user.setTimezone(state.timezone);
         return user;
     }
 }
