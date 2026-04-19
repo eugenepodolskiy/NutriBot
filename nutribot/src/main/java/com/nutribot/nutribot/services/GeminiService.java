@@ -157,9 +157,10 @@ public class GeminiService {
                                    Examples: "add vitamin D 1000 IU", "добавь омегу 3", "принял магний",
                                    "show my supplements", "удали витамин С", "мои добавки", "I took my omega 3".
                                    IMPORTANT: Any message about vitamins or supplements must be SUPPLEMENT, not FOOD_LOG.
-                  PROFILE_UPDATE — user wants to update their profile: weight, height, age, sex, activity level, or fitness goal.
+                  PROFILE_UPDATE — user wants to update their profile: weight, height, age, sex, activity level, fitness goal, or timezone.
                                    Examples: "my weight is now 80kg", "мой вес 75кг", "change my goal to lose weight",
-                                   "update height to 180", "я теперь вешу 70", "I exercise more now".
+                                   "update height to 180", "я теперь вешу 70", "I exercise more now",
+                                   "my timezone is +3", "я в часовом поясе +2", "set timezone to UTC", "timezone -5".
                   UNCLEAR        — the message has nothing to do with food, nutrition, supplements, or profile management
                 Return only the single word, nothing else.
                 """;
@@ -268,11 +269,12 @@ public class GeminiService {
                 The user wants to update their nutrition profile. Extract what they want to change.
                 Respond ONLY with a raw JSON object:
                 {
-                "field":"weight|height|age|sex|activity|goal",
+                "field":"weight|height|age|sex|activity|goal|timezone",
                 "value":"string"
                 }
-                field must be exactly one of: weight, height, age, sex, activity, goal.
+                field must be exactly one of: weight, height, age, sex, activity, goal, timezone.
                 value is the new value as a string.
+                For timezone, preserve the value exactly as the user wrote it (e.g. "+3", "-5", "UTC", "Europe/Moscow").
                 """;
         return callGemini(systemPrompt, text);
     }

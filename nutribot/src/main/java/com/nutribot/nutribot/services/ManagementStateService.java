@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ManagementStateService {
 
     public static final String AWAITING_SUPPLEMENT_DELETE = "AWAITING_SUPPLEMENT_DELETE";
+    public static final String AWAITING_TIMEZONE_INPUT    = "AWAITING_TIMEZONE_INPUT";
 
     private final Map<Long, String> states = new ConcurrentHashMap<>();
 

@@ -88,7 +88,8 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
                 BotCommand.builder().command("supplements").description("View my supplements").build(),
                 BotCommand.builder().command("goals").description("View my daily nutrition goals").build(),
                 BotCommand.builder().command("manage").description("Manage data & profile").build(),
-                BotCommand.builder().command("recent").description("Quick-log a recent dish").build()
+                BotCommand.builder().command("recent").description("Quick-log a recent dish").build(),
+                BotCommand.builder().command("timezone").description("Set my timezone").build()
         );
         try {
             telegramClient.execute(SetMyCommands.builder().commands(commands).build());
@@ -278,6 +279,24 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
                 } else {
                     messageSender.sendAndGetId(buildRecentDishesMenu(chatId, lang, dishes));
                 }
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+            return;
+        }
+
+        if (text.equals("/timezone")) {
+            String lang = foodLogService.getUserLanguage(chatId);
+            messageSender.sendAndGetId(buildTimezoneMenu(chatId, lang));
+            return;
+        }
+
+        // Management state: awaiting manual timezone input
+        if (managementStateService.hasState(chatId) &&
+                ManagementStateService.AWAITING_TIMEZONE_INPUT.equals(managementStateService.getState(chatId))) {
+            managementStateService.clearState(chatId);
+            try {
+                messageSender.sendMessage(chatId, userService.updateTimezone(chatId, text));
             } catch (RuntimeException e) {
                 messageSender.sendMessage(chatId, e.getMessage());
             }
@@ -560,6 +579,20 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
         } else if (data != null && data.startsWith("supp_skip:")) {
             messageSender.sendMessage(chatId, "RU".equals(lang) ? "Хорошо, пропущено." : "OK, skipped.");
 
+        } else if (data != null && data.startsWith("tz_set:")) {
+            String tz = data.substring("tz_set:".length());
+            try {
+                messageSender.sendMessage(chatId, userService.updateTimezone(chatId, tz));
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+
+        } else if ("tz_manual".equals(data)) {
+            managementStateService.setState(chatId, ManagementStateService.AWAITING_TIMEZONE_INPUT);
+            messageSender.sendMessage(chatId, "RU".equals(lang)
+                    ? "Введи часовой пояс. Примеры: +3, -5, UTC, Europe/Moscow"
+                    : "Enter your timezone. Examples: +3, -5, UTC, Europe/Moscow");
+
         } else if (data != null && data.startsWith("recent_log:")) {
             try {
                 long logId = Long.parseLong(data.substring("recent_log:".length()));
@@ -613,6 +646,32 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
                 .chatId(chatId)
                 .text(ru ? "Управление данными:" : "Data management:")
                 .replyMarkup(keyboard)
+                .build();
+    }
+
+    // ── /timezone menu builder ────────────────────────────────────────────────
+
+    private static SendMessage buildTimezoneMenu(Long chatId, String lang) {
+        boolean ru = "RU".equals(lang);
+
+        InlineKeyboardButton utcBtn    = InlineKeyboardButton.builder().text("UTC").callbackData("tz_set:UTC").build();
+        InlineKeyboardButton p1Btn     = InlineKeyboardButton.builder().text("+01:00").callbackData("tz_set:+01:00").build();
+        InlineKeyboardButton p2Btn     = InlineKeyboardButton.builder().text("+02:00").callbackData("tz_set:+02:00").build();
+        InlineKeyboardButton p3Btn     = InlineKeyboardButton.builder().text("+03:00").callbackData("tz_set:+03:00").build();
+        InlineKeyboardButton m5Btn     = InlineKeyboardButton.builder().text("-05:00").callbackData("tz_set:-05:00").build();
+        InlineKeyboardButton m8Btn     = InlineKeyboardButton.builder().text("-08:00").callbackData("tz_set:-08:00").build();
+        InlineKeyboardButton manualBtn = InlineKeyboardButton.builder()
+                .text(ru ? "Ввести вручную" : "Enter manually")
+                .callbackData("tz_manual").build();
+
+        return SendMessage.builder()
+                .chatId(chatId)
+                .text(ru ? "Выбери свой часовой пояс:" : "Select your timezone:")
+                .replyMarkup(InlineKeyboardMarkup.builder()
+                        .keyboardRow(new InlineKeyboardRow(utcBtn, p1Btn, p2Btn))
+                        .keyboardRow(new InlineKeyboardRow(p3Btn, m5Btn, m8Btn))
+                        .keyboardRow(new InlineKeyboardRow(manualBtn))
+                        .build())
                 .build();
     }
 

@@ -11,6 +11,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Map;
 
 @Slf4j
@@ -40,6 +42,18 @@ public class UserService {
         }
     }
 
+    // ── Direct timezone update (called from /timezone command) ────────────────
+
+    @Transactional
+    public String updateTimezone(Long telegramId, String value) {
+        User user = getUser(telegramId);
+        String lang = user.getLanguage();
+        String tz = parseTimezone(value);
+        user.setTimezone(tz);
+        userRepository.save(user);
+        return isRU(lang) ? "Часовой пояс обновлён: " + tz : "Timezone updated to: " + tz;
+    }
+
     // ── Atomic field update + goal recalculation ───────────────────────────────
 
     @Transactional
@@ -66,8 +80,14 @@ public class UserService {
                         return isRU(lang) ? "Укажите мужской или женский." : "Please specify male or female.";
                     }
                 }
-                case "activity" -> user.setActivityLevel(geminiService.classifyActivity(value));
-                case "goal"     -> user.setGoalType(safeGoalType(value));
+                case "activity"  -> user.setActivityLevel(geminiService.classifyActivity(value));
+                case "goal"      -> user.setGoalType(safeGoalType(value));
+                case "timezone"  -> {
+                    String tz = parseTimezone(value);
+                    user.setTimezone(tz);
+                    userRepository.save(user);
+                    return isRU(lang) ? "Часовой пояс обновлён: " + tz : "Timezone updated to: " + tz;
+                }
                 default -> { return unknownUpdate(lang); }
             }
         } catch (NumberFormatException e) {
@@ -148,6 +168,18 @@ public class UserService {
         } catch (IllegalArgumentException e) {
             return GoalType.MAINTAIN;
         }
+    }
+
+    static String parseTimezone(String value) {
+        String v = value.trim();
+        if (v.equalsIgnoreCase("UTC")) return "UTC";
+        try { return ZoneId.of(v).getId(); } catch (Exception ignored) {}
+        try {
+            String stripped = v.startsWith("+") ? v.substring(1) : v;
+            int hours = Integer.parseInt(stripped);
+            return ZoneOffset.ofHours(hours).getId();
+        } catch (Exception ignored) {}
+        return "UTC";
     }
 
     private static String unknownUpdate(String lang) {
