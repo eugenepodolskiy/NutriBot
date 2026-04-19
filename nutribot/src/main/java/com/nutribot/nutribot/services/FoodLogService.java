@@ -15,7 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -109,6 +112,46 @@ public class FoodLogService {
         String summary = buildSummary(user, nutrition, totals(todayLogs), true);
         String suppStatus = supplementService.getTodaySupplementStatus(user, user.getLanguage());
         return suppStatus.isEmpty() ? summary : summary + "\n" + suppStatus;
+    }
+
+    // ── /recent: distinct dishes from last 7 days ─────────────────────────────
+
+    @Transactional(readOnly = true)
+    public List<FoodLog> getRecentDistinctDishes(Long telegramId) {
+        User user = getUser(telegramId);
+        LocalDateTime start = LocalDate.now().minusDays(6).atStartOfDay();
+        LocalDateTime end   = LocalDate.now().plusDays(1).atStartOfDay();
+        List<FoodLog> logs = foodLogRepository
+                .findTop20ByUserIdAndLoggedAtBetweenOrderByLoggedAtDesc(user.getId(), start, end);
+
+        List<FoodLog> distinct = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (FoodLog log : logs) {
+            String desc = log.getDescription() != null ? log.getDescription().trim().toLowerCase() : "";
+            if (!desc.isEmpty() && seen.add(desc)) {
+                distinct.add(log);
+                if (distinct.size() == 7) break;
+            }
+        }
+        return distinct;
+    }
+
+    @Transactional(readOnly = true)
+    public NutritionResponse getNutritionFromLog(Long telegramId, Long logId) {
+        User user = getUser(telegramId);
+        FoodLog log = foodLogRepository.findById(logId)
+                .filter(l -> l.getUser().getId().equals(user.getId()))
+                .orElseThrow(() -> new RuntimeException(isRU(user)
+                        ? "Запись не найдена." : "Food log entry not found."));
+        NutritionResponse n = new NutritionResponse();
+        n.setFoodName(log.getDescription());
+        n.setGrams(log.getGrams());
+        n.setCalories(log.getCalories());
+        n.setProtein(log.getProtein());
+        n.setCarbs(log.getCarbs());
+        n.setFat(log.getFat());
+        n.setFiber(log.getFiber());
+        return n;
     }
 
     // ── Feature 3: Recent logs ─────────────────────────────────────────────────

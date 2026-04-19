@@ -122,6 +122,19 @@ public class GeminiService {
         return callGemini(systemPrompt, userPrompt);
     }
 
+    // ── General nutrition chat ────────────────────────────────────────────────
+
+    public String chat(String message, String lang) {
+        String langHint = "RU".equals(lang) ? "Respond in Russian." : "Respond in English.";
+        String systemPrompt = """
+                You are a friendly nutrition and health assistant built into a food tracking app.
+                Answer the user's question naturally and conversationally.
+                When relevant, connect your answer to nutrition, healthy eating, or wellness.
+                Keep responses concise and helpful.
+                """ + langHint;
+        return callGemini(systemPrompt, message);
+    }
+
     // ── Intent detection ──────────────────────────────────────────────────────
 
     /**
@@ -133,14 +146,21 @@ public class GeminiService {
         String systemPrompt = """
                 Classify the intent of this message from a nutrition tracking app user.
                 Return exactly one word from the following list:
-                  FOOD_LOG       — user is describing food they ate or drank
+                  FOOD_LOG       — user is describing food they ate or drank (NOT supplements/vitamins)
                   SUGGESTION     — user is asking for meal suggestions or what to eat next
                   CORRECTION     — user wants to correct or change a pending food entry
                   EDIT_LOG       — user wants to edit or update their most recent logged food entry
                   HISTORY        — user wants to see their food history, past logs, or a summary of previous days
-                  SUPPLEMENT     — user is asking about supplements or vitamins (add, list, delete, mark taken, reminders)
-                  PROFILE_UPDATE — user wants to update their profile (weight, height, age, sex, activity level, or goal)
-                  UNCLEAR        — the message has nothing to do with food, nutrition, or profile management
+                  SUPPLEMENT     — user is managing supplements or vitamins: adding to schedule, removing, viewing list,
+                                   or marking as taken/untaken. Keywords: "supplement", "vitamin", "добавь витамин",
+                                   "добавка", "принял", "выпил", "омега", "магний", "кальций", "zinc", "omega", "magnesium".
+                                   Examples: "add vitamin D 1000 IU", "добавь омегу 3", "принял магний",
+                                   "show my supplements", "удали витамин С", "мои добавки", "I took my omega 3".
+                                   IMPORTANT: Any message about vitamins or supplements must be SUPPLEMENT, not FOOD_LOG.
+                  PROFILE_UPDATE — user wants to update their profile: weight, height, age, sex, activity level, or fitness goal.
+                                   Examples: "my weight is now 80kg", "мой вес 75кг", "change my goal to lose weight",
+                                   "update height to 180", "я теперь вешу 70", "I exercise more now".
+                  UNCLEAR        — the message has nothing to do with food, nutrition, supplements, or profile management
                 Return only the single word, nothing else.
                 """;
         String userPrompt = "User language: " + userLanguage + "\nMessage: " + text;

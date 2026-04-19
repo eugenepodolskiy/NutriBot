@@ -21,6 +21,10 @@ public interface FoodLogRepository extends JpaRepository<FoodLog, Long> {
     /** Last 5 entries across all time — used by getRecentLogs. */
     List<FoodLog> findTop5ByUserIdOrderByLoggedAtDesc(Long userId);
 
+    /** Last 20 entries in a time window ordered by most recent — used by getRecentDistinctDishes. */
+    List<FoodLog> findTop20ByUserIdAndLoggedAtBetweenOrderByLoggedAtDesc(
+            Long userId, LocalDateTime start, LocalDateTime end);
+
     /** All logs for a user — used by profile reset. */
     List<FoodLog> findByUserId(Long userId);
 

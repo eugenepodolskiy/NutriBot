@@ -2,6 +2,7 @@ package com.nutribot.nutribot.bot;
 
 import com.nutribot.nutribot.dto.NutritionResponse;
 import com.nutribot.nutribot.enums.LogSource;
+import com.nutribot.nutribot.models.FoodLog;
 import com.nutribot.nutribot.services.*;
 import com.nutribot.nutribot.services.ManagementService;
 import com.nutribot.nutribot.services.ManagementStateService;
@@ -34,6 +35,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -85,7 +87,8 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
                 BotCommand.builder().command("suggest").description("Get meal suggestions based on remaining goals").build(),
                 BotCommand.builder().command("supplements").description("View my supplements").build(),
                 BotCommand.builder().command("goals").description("View my daily nutrition goals").build(),
-                BotCommand.builder().command("manage").description("Manage data & profile").build()
+                BotCommand.builder().command("manage").description("Manage data & profile").build(),
+                BotCommand.builder().command("recent").description("Quick-log a recent dish").build()
         );
         try {
             telegramClient.execute(SetMyCommands.builder().commands(commands).build());
@@ -264,6 +267,23 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
             return;
         }
 
+        if (text.equals("/recent")) {
+            try {
+                String lang = foodLogService.getUserLanguage(chatId);
+                List<FoodLog> dishes = foodLogService.getRecentDistinctDishes(chatId);
+                if (dishes.isEmpty()) {
+                    messageSender.sendMessage(chatId, "RU".equals(lang)
+                            ? "Нет недавних блюд. Сначала запиши, что ты ел."
+                            : "No recent dishes yet. Log some food first.");
+                } else {
+                    messageSender.sendAndGetId(buildRecentDishesMenu(chatId, lang, dishes));
+                }
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
+            return;
+        }
+
         // Management state: user is replying with a supplement number to delete
         if (managementStateService.hasState(chatId) &&
                 ManagementStateService.AWAITING_SUPPLEMENT_DELETE.equals(managementStateService.getState(chatId))) {
@@ -322,9 +342,13 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
                     messageSender.sendMessage(chatId, e.getMessage());
                 }
             }
-            case "UNCLEAR" -> messageSender.sendMessage(chatId, "RU".equals(lang)
-                    ? "Я помогаю отслеживать питание. Напиши, что ты съел, или спроси, что поесть."
-                    : "I help track nutrition. Tell me what you ate, or ask for meal suggestions.");
+            case "UNCLEAR" -> {
+                try {
+                    messageSender.sendMessage(chatId, geminiService.chat(text, lang));
+                } catch (RuntimeException e) {
+                    messageSender.sendMessage(chatId, e.getMessage());
+                }
+            }
             default -> analyzeAndStorePending(chatId, text); // FOOD_LOG
         }
     }
@@ -535,6 +559,18 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
 
         } else if (data != null && data.startsWith("supp_skip:")) {
             messageSender.sendMessage(chatId, "RU".equals(lang) ? "Хорошо, пропущено." : "OK, skipped.");
+
+        } else if (data != null && data.startsWith("recent_log:")) {
+            try {
+                long logId = Long.parseLong(data.substring("recent_log:".length()));
+                NutritionResponse nutrition = foodLogService.getNutritionFromLog(chatId, logId);
+                String description = nutrition.getFoodName() != null ? nutrition.getFoodName() : "food";
+                pendingConfirmationService.store(chatId, nutrition, LogSource.AI_DECOMPOSED, description);
+                Integer msgId = messageSender.sendAndGetId(buildConfirmationSendMessage(chatId, lang, nutrition));
+                pendingConfirmationService.getPending(chatId).setConfirmationMessageId(msgId);
+            } catch (RuntimeException e) {
+                messageSender.sendMessage(chatId, e.getMessage());
+            }
         }
     }
 
@@ -577,6 +613,26 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
                 .chatId(chatId)
                 .text(ru ? "Управление данными:" : "Data management:")
                 .replyMarkup(keyboard)
+                .build();
+    }
+
+    // ── /recent menu builder ───────────────────────────────────────────────────
+
+    private static SendMessage buildRecentDishesMenu(Long chatId, String lang, List<FoodLog> dishes) {
+        InlineKeyboardMarkup.InlineKeyboardMarkupBuilder keyboardBuilder = InlineKeyboardMarkup.builder();
+        for (FoodLog dish : dishes) {
+            String label = dish.getDescription() != null ? dish.getDescription() : "Unknown";
+            if (label.length() > 40) label = label.substring(0, 37) + "...";
+            InlineKeyboardButton btn = InlineKeyboardButton.builder()
+                    .text(label)
+                    .callbackData("recent_log:" + dish.getId())
+                    .build();
+            keyboardBuilder.keyboardRow(new InlineKeyboardRow(btn));
+        }
+        return SendMessage.builder()
+                .chatId(chatId)
+                .text("RU".equals(lang) ? "Недавние блюда — нажми, чтобы записать снова:" : "Recent dishes — tap to log again:")
+                .replyMarkup(keyboardBuilder.build())
                 .build();
     }
 
