@@ -165,11 +165,17 @@ public class GeminiService {
                 Return only the single word, nothing else.
                 """;
         String userPrompt = "User language: " + userLanguage + "\nMessage: " + text;
-        String result = callGemini(systemPrompt, userPrompt).trim().toUpperCase();
+        String raw = callGemini(systemPrompt, userPrompt);
+        // Take only the first token and strip any punctuation — Gemini may add trailing dots or extra lines
+        String result = raw.trim().split("\\s+")[0].toUpperCase().replaceAll("[^A-Z_]", "");
+        log.info("INTENT: text='{}' rawGemini='{}' parsed='{}'", text, raw.trim(), result);
         return switch (result) {
             case "FOOD_LOG", "SUGGESTION", "CORRECTION", "EDIT_LOG",
                     "HISTORY", "SUPPLEMENT", "PROFILE_UPDATE", "UNCLEAR" -> result;
-            default -> "FOOD_LOG";
+            default -> {
+                log.warn("INTENT: unrecognised value='{}' defaulting to FOOD_LOG", result);
+                yield "FOOD_LOG";
+            }
         };
     }
 

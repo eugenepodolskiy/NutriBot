@@ -321,6 +321,7 @@ public class NutriBot implements SpringLongPollingBot, LongPollingSingleThreadUp
 
         String lang   = foodLogService.getUserLanguage(chatId);
         String intent = geminiService.detectIntent(text, lang);
+        log.info("DISPATCH: chatId={} intent='{}' text='{}'", chatId, intent, text);
 
         switch (intent) {
             case "SUGGESTION" -> {

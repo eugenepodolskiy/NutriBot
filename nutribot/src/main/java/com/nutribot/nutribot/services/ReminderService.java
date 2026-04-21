@@ -7,6 +7,7 @@ import com.nutribot.nutribot.models.User;
 import com.nutribot.nutribot.repositories.FoodLogRepository;
 import com.nutribot.nutribot.repositories.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -23,6 +24,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ReminderService {
@@ -41,6 +43,9 @@ public class ReminderService {
         for (User user : userRepository.findAll()) {
             ZoneId zone = SupplementService.getZone(user.getTimezone());
             ZonedDateTime userNow = ZonedDateTime.now(zone);
+            log.info("REMINDER_CHECK: userId={} dbTimezone='{}' resolvedZone='{}' userLocalTime='{}'",
+                    user.getId(), user.getTimezone(), zone.getId(),
+                    userNow.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z")));
             if (userNow.getMinute() != 0) continue;
             int hour = userNow.getHour();
             if (hour != 8 && hour != 12 && hour != 16 && hour != 20) continue;
